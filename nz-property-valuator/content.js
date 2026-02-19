@@ -19,21 +19,13 @@
   const TIMEOUT_MS  = 10_000;   // give up address extraction after 10 s
   const INTERVAL_MS = 300;      // poll every 300 ms
 
-  // Sources shown in the panel.
-  // 'Homes' is driven by DOM scraping (TradeMe renders it); others via background.js.
-  const SOURCES = ['OneRoof', 'PropertyValue', 'Homes'];
-
-  // ─── Format helper (mirrors background.js) ───────────────────────────────
-  function fmtAmount(n) {
-    if (n >= 1_000_000) return '$' + parseFloat((n / 1_000_000).toFixed(2)) + 'M';
-    return '$' + Math.round(n / 1_000) + 'K';
-  }
+  // Sources shown in the panel (fetched via background.js).
+  const SOURCES = ['OneRoof', 'PropertyValue'];
 
   // ─── Module state ─────────────────────────────────────────────────────────
   let currentShadow = null;   // shadow root of the active panel
   let pollTimer     = null;   // setTimeout handle for the active poll cycle
   let pollStart     = 0;      // Date.now() when the current poll cycle began
-  let homesTimer    = null;   // setTimeout handle for HomesEstimate polling
 
   // ─── Strategy 1: JSON-LD ──────────────────────────────────────────────────
   // TradeMe injects a <script type="application/ld+json"> with:
@@ -277,7 +269,6 @@
       cardsEl.innerHTML = SOURCES.map(buildCardHTML).join('');
       const address = { streetAddress: text, suburb: '', city: '', fullAddress: text };
       requestValuations(address);
-      startHomesPolling(currentShadow);
     }
 
     btn.addEventListener('click', doSearch);
@@ -411,89 +402,6 @@
     );
   }
 
-  // ─── HomesEstimate (DOM scrape) ───────────────────────────────────────────
-  // TradeMe renders the Homes.co.nz AVM inside a <tm-property-homes-estimate>
-  // Angular element.  We poll until the dollar value appears in its textContent.
-  //
-  // Returns:
-  //   null   — element not yet in DOM (keep waiting)
-  //   ''     — element present but no dollar value (not available for listing)
-  //   string — formatted estimate e.g. "$920K" or "$550K – $600K"
-
-  function tryGetHomesEstimate() {
-    // Strategy 1: known custom element / attribute selectors.
-    let container = null;
-    for (const sel of [
-      'tm-property-homes-estimate',
-      '[data-testid*="homes-estimate"]',
-      '[class*="homes-estimate"]',
-      '[class*="HomesEstimate"]',
-    ]) {
-      container = document.querySelector(sel);
-      if (container) break;
-    }
-
-    // Strategy 2: find the exact "HomesEstimate" text node and walk up to the
-    // nearest ancestor that contains a dollar value — this is the estimate card.
-    if (!container) {
-      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-      let node;
-      while ((node = walker.nextNode())) {
-        if (node.data.trim() === 'HomesEstimate') {
-          let el = node.parentElement;
-          while (el && el !== document.body) {
-            if (/\$/.test(el.textContent)) { container = el; break; }
-            el = el.parentElement;
-          }
-          break;
-        }
-      }
-    }
-
-    if (!container) return null;
-
-    // Extract dollar values. Handles both raw ($920,000) and K/M ($920K, $1.04M) formats.
-    const text = container.textContent.replace(/\s+/g, ' ');
-    const RE   = /\$([\d,]+(?:\.\d+)?)\s*([KMkm]?)/g;
-    const hits = [...text.matchAll(RE)];
-    if (hits.length === 0) return '';
-
-    function parseDollar(m) {
-      const n    = parseFloat(m[1].replace(/,/g, ''));
-      const mult = /[Kk]/.test(m[2]) ? 1e3 : /[Mm]/.test(m[2]) ? 1e6 : 1;
-      return isFinite(n) && n > 0 ? n * mult : null;
-    }
-
-    const lo = parseDollar(hits[0]);
-    if (!lo) return '';
-    const hi     = hits[1] ? parseDollar(hits[1]) : null;
-    const validHi = hi && hi >= lo && hi <= lo * 3; // guard against unrelated values
-    return validHi ? `${fmtAmount(lo)} \u2013 ${fmtAmount(hi)}` : fmtAmount(lo);
-  }
-
-  function startHomesPolling(shadow) {
-    if (homesTimer !== null) { clearTimeout(homesTimer); homesTimer = null; }
-    const start = Date.now();
-
-    function poll() {
-      homesTimer = null;
-      const val = tryGetHomesEstimate();
-
-      if ((val === null || val === '') && Date.now() - start < 15_000) {
-        // Element not yet in DOM, or present but value not yet rendered — keep waiting.
-        homesTimer = setTimeout(poll, INTERVAL_MS);
-        return;
-      }
-
-      setCardState(shadow, 'Homes', val
-        ? { source: 'Homes', estimate: val, url: null, error: null }
-        : { source: 'Homes', estimate: null, url: null, error: 'Not available on this listing' }
-      );
-    }
-
-    homesTimer = setTimeout(poll, INTERVAL_MS);
-  }
-
   // ─── Polling ──────────────────────────────────────────────────────────────
 
   function startPolling() {
@@ -513,7 +421,6 @@
       relocatePanel();
       setSubtitle(currentShadow, null);     // hide "Detecting address…"
       requestValuations(address);
-      startHomesPolling(currentShadow);
       return;
     }
     if (Date.now() - pollStart >= TIMEOUT_MS) {
@@ -536,10 +443,9 @@
 
     console.log(LOG, 'SPA navigation detected, restarting:', location.href);
 
-    // Tear down the old panel and stop any in-flight HomesEstimate poll.
+    // Tear down the old panel.
     document.getElementById('nz-valuator-host')?.remove();
     currentShadow = null;
-    if (homesTimer !== null) { clearTimeout(homesTimer); homesTimer = null; }
 
     // Start fresh — inject panel with loading state, then re-poll.
     currentShadow = injectPanel();
@@ -556,8 +462,7 @@
   // ─── Cleanup ──────────────────────────────────────────────────────────────
 
   window.addEventListener('beforeunload', () => {
-    if (pollTimer  !== null) { clearTimeout(pollTimer);  pollTimer  = null; }
-    if (homesTimer !== null) { clearTimeout(homesTimer); homesTimer = null; }
+    if (pollTimer !== null) { clearTimeout(pollTimer); pollTimer = null; }
   });
 
   // ─── Bootstrap ────────────────────────────────────────────────────────────
