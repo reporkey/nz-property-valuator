@@ -8,11 +8,13 @@ Fill in each TODO before implementing any fetching logic.
 ## OneRoof (oneroof.co.nz)
 
 ### Base URL
+
 ```
 https://www.oneroof.co.nz
 ```
 
 ### Search URL Pattern
+
 ```
 # Regional listing search (browse):
 https://www.oneroof.co.nz/search/houses-for-sale/region_<region-name>-<region-id>_page_<n>
@@ -28,6 +30,7 @@ https://www.oneroof.co.nz/estimate/map/region_all-new-zealand-1
 ```
 
 ### Known API Endpoints
+
 ```
 # Official OpenAPI docs (JS-rendered Swagger/ReDoc UI — open in browser):
 https://docs.oneroof.co.nz/openapi/index.html
@@ -48,6 +51,7 @@ https://s.oneroof.co.nz/...
 ```
 
 ### Property Page URL Pattern
+
 ```
 https://www.oneroof.co.nz/property/<region>/<suburb>/<address-slug>/<property-id>
 
@@ -64,6 +68,7 @@ https://www.oneroof.co.nz/property/auckland/westmere/80-warnock-street/RoHzS
 ```
 
 ### Valuation Estimate CSS Selector
+
 ```
 # ⚠️  No stable CSS selector found.
 #
@@ -86,38 +91,42 @@ https://www.oneroof.co.nz/property/auckland/westmere/80-warnock-street/RoHzS
 ```
 
 ### Anti-Scraping Measures
+
 - **Next.js RSC streaming**: Data is not returned by a simple REST endpoint; it is
-  embedded inline as serialised React state. A plain `fetch()` of the page HTML
-  will include the data, but parsing it is non-trivial.
+embedded inline as serialised React state. A plain `fetch()` of the page HTML
+will include the data, but parsing it is non-trivial.
 - **A/B testing**: Abtasty tracker present — page content may vary between sessions.
 - **Analytics**: Google Tag Manager (GTM-58D24DV) — behavioural tracking in place.
 - **No Cloudflare challenge** detected on basic property page fetches (as of research date).
 - **No login required** for viewing estimate data on public property pages.
 - **CDN assets** on separate origins (`assets.oneroof.co.nz`, `s.oneroof.co.nz`) —
-  CORS policy on these is TODO; the main page HTML should be accessible without CORS issues.
+CORS policy on these is TODO; the main page HTML should be accessible without CORS issues.
 - TODO: Test whether a server-side `fetch()` (no browser headers) returns the full
-  RSC payload or a stripped/bot-blocked response.
+RSC payload or a stripped/bot-blocked response.
 
 ### Notes
+
 > - AVM (Automated Valuation Model) is provided by **Valocity** — mentioned in the
->   "Valocity Disclaimers" section of `/property-valuations`.
+> "Valocity Disclaimers" section of `/property-valuations`.
 > - The estimate gauge shows a confidence band (low / mid / high) plus the local
->   council Rating Valuation (RV) for comparison.
+> council Rating Valuation (RV) for comparison.
 > - Official API docs exist at `docs.oneroof.co.nz/openapi/index.html` but require
->   JavaScript to render — check whether an unauthenticated API key is available.
+> JavaScript to render — check whether an unauthenticated API key is available.
 > - Property IDs are short base-62 hashes (e.g. `qeHJ8`); the address slug and
->   region/suburb are human-readable but the ID is the canonical identifier.
+> region/suburb are human-readable but the ID is the canonical identifier.
 
 ---
 
 ## PropertyValue (propertyvalue.co.nz)
 
 ### Base URL
+
 ```
 https://www.propertyvalue.co.nz
 ```
 
 ### Search URL Pattern
+
 ```
 # Hierarchical browse (region → district → suburb):
 https://www.propertyvalue.co.nz/<region>
@@ -128,42 +137,65 @@ https://www.propertyvalue.co.nz/auckland
 https://www.propertyvalue.co.nz/wellington
 https://www.propertyvalue.co.nz/canterbury/christchurch-city/60
 
-# Address search is handled by a client-side search form on the homepage.
-# TODO: Intercept via DevTools (Network → Fetch/XHR) while typing an address
-# to capture the autocomplete API call (likely POST or GET to /api/...).
-# No query-string search URL was found in static analysis.
+# Address autocomplete API (confirmed working, no auth required):
+GET /api/public/clapi/suggestions?q=<address>&suggestionTypes=address&limit=5
+
+# Example:
+GET https://www.propertyvalue.co.nz/api/public/clapi/suggestions?q=14+Sefton+Street&suggestionTypes=address&limit=5
+# Response 200: { "suggestions": [ { "propertyId": 7120741, "address": "...", ... } ] }
+# Response 404: { "errors": [{ "msg": "No data found for your search." }] } when no match
 ```
 
 ### Known API Endpoints
+
 ```
-# ⚠️  No REST API endpoints found via static HTML analysis.
-#
-# The site is a React + Redux SPA with SERVER-SIDE RENDERING (SSR).
-# ALL property and valuation data is embedded in the initial HTML inside a
-# <script> tag as:
-#
-#   window.REDUX_DATA = { ... }
-#
-# This means a single fetch() of the property page URL returns the full
-# estimate — no separate XHR call is needed.
-#
-# Confirmed by: PropertyDetails.isServerRender === true in the Redux state.
-#
-# Redux state structure relevant to valuations:
-#   window.REDUX_DATA.PropertyDetails.estimatedRange
-#     → { lowerBand: 2200000, upperBand: 2400000, confidence: "MEDIUM" }
-#   window.REDUX_DATA.PropertyDetails.ratingValuation
-#     → { capitalValue, landValue, improvementValue, valuationDate, valuationRef }
-#   window.REDUX_DATA.PropertyDetails.propertyId
-#     → integer, e.g. 7120741
-#
-# Images CDN: https://images.corelogic.asia/...  (signed URLs)
-#
-# TODO: Use DevTools Network tab to confirm whether any autocomplete or
-# property-lookup XHR calls exist that are not visible in static HTML.
+# ✅ Full public REST API confirmed — no authentication required.
+# All public endpoints are under:
+#   https://www.propertyvalue.co.nz/api/public/clapi/
+# (confirmed by reverse-engineering /main.d8e1ef19.js)
+
+# 1. Address autocomplete
+GET /api/public/clapi/suggestions?q=<query>&suggestionTypes=address&limit=5
+# → { suggestions: [...] }
+
+# 2. Property details — PRIMARY ENDPOINT (includes estimate, no auth needed)
+GET /api/public/clapi/properties/<property-id>
+# → {
+#     propertyId:       7120741,
+#     estimatedRange:   { lowerBand: 2200000, upperBand: 2400000, confidence: "MEDIUM" },
+#     ratingValuation:  { capitalValue: "2370000", landValue: "1530000",
+#                         improvementValue: "840000", valuationDate: "2024-09-01",
+#                         valuationRef: "16851/36800", legalDescriptions: [...] },
+#     core:             { beds, baths, carSpaces, landArea, ... },
+#     location:         { locallyFormattedAddress, latitude, longitude, ... },
+#     isForSale:        true,
+#     propertyTimeline: [...],  // listing and sale history
+#     sales:            { lastSale: {} }
+#   }
+# Confirmed live: HTTP 200, no auth, no session cookie required.
+
+# 3. Resolve property page URL from integer ID
+GET /api/public/clapi/properties/propertyUrl?propertyId=<id>
+# → plain string path, e.g.:
+#   "/wellington/wellington-city/wadestown-6012/14-sefton-street-...-7120741"
+# Confirmed live: HTTP 200, no auth.
+
+# 4. Property search (by location / address text)
+GET /api/public/clapi/property/search
+# Params: locationType, locationId, propertyAddress, recordsPerPage, pageNumber,
+#         streetName, suburbName, councilArea, requestLocation
+# (authenticated variant: /api/private/clapi/property/search)
+
+# 5. Comparables
+GET /api/public/clapi/comparables/<property-id>
+
+# 6. Property trends
+GET /api/public/clapi/property/trends/house-values
+GET /api/public/clapi/property/trends/sales-prices
 ```
 
 ### Property Page URL Pattern
+
 ```
 https://www.propertyvalue.co.nz/<region>/<district>/<suburb-postcode>/<address-slug>-<property-id>
 
@@ -181,50 +213,56 @@ https://www.propertyvalue.co.nz/otago/queenstown-lakes-district/jacks-point-9371
 ```
 
 ### Valuation Estimate CSS Selector
+
 ```
-# ⚠️  No CSS selector needed — parse window.REDUX_DATA from the initial HTML.
+# ✅ No CSS selector needed — use the REST API directly.
 #
-# Approach:
-#   1. Fetch the property page URL
-#   2. Extract the JSON blob: window.REDUX_DATA = { ... }  (brace-match to end)
-#   3. Parse JSON → data.PropertyDetails.estimatedRange
+# Preferred approach (API):
+#   1. Autocomplete: GET /api/public/clapi/suggestions?q=<address>&suggestionTypes=address&limit=5
+#      → extract propertyId integer from suggestions[0].propertyId
+#   2. Estimate:     GET /api/public/clapi/properties/<propertyId>
+#      → read response.estimatedRange and response.ratingValuation
 #
-# Confirmed data shape (from live page 7120741):
+# Confirmed data shape (property 7120741, live):
 #   estimatedRange: {
 #     lowerBand:  2200000,   // integer, NZD
 #     upperBand:  2400000,   // integer, NZD
 #     confidence: "MEDIUM"   // "LOW" | "MEDIUM" | "HIGH"
 #   }
 #   ratingValuation: {
-#     capitalValue:     "2370000",
+#     capitalValue:     "2370000",  // string, NZD
 #     landValue:        "1530000",
 #     improvementValue: "840000",
 #     valuationDate:    "2024-09-01",
 #     valuationRef:     "16851/36800"
 #   }
 #
-# If a CSS selector IS required (after JS hydration), TODO: inspect in DevTools.
+# Fallback approach (HTML parsing):
+#   Fetch property page URL → extract window.REDUX_DATA JSON blob (brace-match)
+#   → parse data.PropertyDetails.estimatedRange (same shape as above)
+#   Only needed if the API starts requiring auth.
 ```
 
 ### Anti-Scraping Measures
-- **Imperva Incapsula WAF**: `/_Incapsula_Resource?SWJIYLWA=...` script injected on every page.
-  Basic curl fetches still returned full REDUX_DATA during research, but this may
-  activate for repeated/automated requests. Test with real browser headers.
-- **SSR data in initial HTML**: No second request needed; estimate is in page HTML.
-  This is actually favourable for scraping — no CORS issue to solve.
-- **No Cloudflare** challenge detected on basic property page fetches.
-- **No login required** for viewing estimate data on public property pages.
-- **Convert.com A/B testing**: `cdn-4.convertexperiments.com` script present — UI
-  variants possible, but REDUX_DATA structure should remain stable.
+
+- **Imperva Incapsula WAF**: `/_Incapsula_Resource?SWJIYLWA=...` script injected on
+  every page HTML. The `/api/public/clapi/*` endpoints returned HTTP 200 without
+  browser cookies during research — Incapsula appears to protect the HTML UI layer,
+  not the JSON API layer.
+- **No Cloudflare** challenge detected on API or page fetches.
+- **No login required** for `/api/public/clapi/*` endpoints (confirmed live).
+- **CORS**: API responses include `X-CDN: Imperva` header; CORS policy on the JSON
+  API endpoints needs testing from a Chrome extension `fetch()` context.
 - **Analytics**: Google Tag Manager ×2 (GTM-WS5J7MD, GTM-W2GFLV8).
-- TODO: Test with `fetch()` from extension context (no browser cookies) to confirm
-  Incapsula does not block and REDUX_DATA is still populated.
+- **Convert.com A/B testing**: `cdn-4.convertexperiments.com` — affects UI only,
+  not the API response structure.
 
 ### Notes
+
 > - AVM data powered by **CoreLogic / Cotality** (`cotality.com/nz`) — same data
->   provider used by NZ banks and councils. Signed image URLs from `images.corelogic.asia`.
-> - Property IDs are plain **integers** (CoreLogic IDs), not hashes, e.g. `7120741`.
->   The full address slug in the URL is human-readable but the integer ID is canonical.
+>   provider used by NZ banks and councils.
+> - Property IDs are plain **integers** (CoreLogic IDs), e.g. `7120741`. Not hashes.
 > - `robots.txt` has no Disallow rules — all paths permitted for crawlers.
-> - The property page returns `isServerRender: true` — reliable indicator that data
->   will be present in the initial HTML without JS execution.
+> - The `/api/public/clapi/properties/<id>` endpoint returns the same data as
+>   `window.REDUX_DATA.PropertyDetails` in the SSR HTML — both approaches are valid.
+
