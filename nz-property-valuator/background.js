@@ -252,17 +252,96 @@ async function fetchOneRoof(address) {
 }
 
 // ─── homes.co.nz fetcher ─────────────────────────────────────────────────
-// STUB — real scraping logic to be added after researching the site.
-// Returns mock data after a simulated 1 s network delay.
+// Flow:
+//   1. GET https://gateway.homes.co.nz/address/search?Address=<fullAddress>
+//      → Results[0].PropertyID  (UUID)
+//   2. GET https://gateway.homes.co.nz/properties?property_ids=<uuid>
+//      → cards[0].property_details.{display_estimated_lower_value_short,
+//                                   display_estimated_upper_value_short}
+//        cards[0].url  → relative path e.g. "/lower-hutt/korokoro/..."
+//
+// The gateway requires Origin + Referer headers matching homes.co.nz.
+// Display strings are already K/M-formatted ("920K", "1.04M"); prepend "$".
+
+const HG_BASE_URL = 'https://gateway.homes.co.nz';
+const HG_HEADERS  = {
+  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Accept':     'application/json',
+  'Origin':     'https://homes.co.nz',
+  'Referer':    'https://homes.co.nz/',
+};
 
 async function fetchHomes(address) {
-  await new Promise(resolve => setTimeout(resolve, 1_000));
+  // ── Step 1: Resolve address to PropertyID ─────────────────────────────────
+  const searchUrl = `${HG_BASE_URL}/address/search` +
+    `?Address=${encodeURIComponent(address.fullAddress)}`;
+
+  let searchData;
+  try {
+    const resp = await fetchWithBackoff(searchUrl, { headers: HG_HEADERS });
+    if (!resp.ok) throw new Error(`homes.co.nz search failed (HTTP ${resp.status})`);
+    searchData = await resp.json();
+  } catch (err) {
+    return {
+      source:     'homes.co.nz',
+      estimate:   null,
+      url:        null,
+      confidence: null,
+      error:      /homes\.co\.nz/.test(err.message) ? err.message : 'homes.co.nz request failed',
+    };
+  }
+
+  const results = searchData.Results ?? [];
+  if (results.length === 0) {
+    return { source: 'homes.co.nz', estimate: null, url: null, confidence: null,
+             error: 'Address not found on homes.co.nz' };
+  }
+
+  const propertyId = results[0].PropertyID;
+
+  const norm       = s => s.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+  const confidence = norm(results[0].Title ?? '').startsWith(norm(address.streetAddress))
+    ? 'high' : 'medium';
+
+  // ── Step 2: Fetch estimate card ───────────────────────────────────────────
+  const cardUrl = `${HG_BASE_URL}/properties?property_ids=${propertyId}`;
+
+  let cardData;
+  try {
+    const resp = await fetchWithBackoff(cardUrl, { headers: HG_HEADERS });
+    if (!resp.ok) throw new Error(`homes.co.nz card failed (HTTP ${resp.status})`);
+    cardData = await resp.json();
+  } catch (err) {
+    return {
+      source:     'homes.co.nz',
+      estimate:   null,
+      url:        null,
+      confidence,
+      error:      /homes\.co\.nz/.test(err.message) ? err.message : 'homes.co.nz request failed',
+    };
+  }
+
+  const card = (cardData.cards ?? [])[0];
+  if (!card) {
+    return { source: 'homes.co.nz', estimate: null, url: null, confidence,
+             error: 'homes.co.nz returned no property data' };
+  }
+
+  const pd      = card.property_details ?? {};
+  const lo      = pd.display_estimated_lower_value_short;
+  const hi      = pd.display_estimated_upper_value_short;
+  const pageUrl = card.url ? 'https://homes.co.nz' + card.url : null;
+
+  if (!lo || !hi) {
+    return { source: 'homes.co.nz', estimate: null, url: pageUrl, confidence,
+             error: 'No estimate available on homes.co.nz' };
+  }
 
   return {
     source:     'homes.co.nz',
-    estimate:   '$820K – $900K',
-    url:        'https://homes.co.nz/',
-    confidence: 'medium',
+    estimate:   `$${lo} \u2013 $${hi}`,   // e.g. "$920K – $1.04M"
+    url:        pageUrl,
+    confidence,
     error:      null,
   };
 }
