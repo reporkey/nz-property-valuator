@@ -87,6 +87,19 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 10_000) {
   }
 }
 
+// Fetch with exponential backoff on HTTP 429 Too Many Requests.
+// Attempts: 0 … maxRetries  →  delays ≈ 1 s, 2 s, 4 s before giving up.
+// Jitter (±400 ms random) spreads simultaneous retries across sources.
+async function fetchWithBackoff(url, options = {}, timeoutMs = 10_000, maxRetries = 3) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const resp = await fetchWithTimeout(url, options, timeoutMs);
+    if (resp.status !== 429) return resp;
+    if (attempt === maxRetries) return resp;          // return the 429 so caller can handle
+    const delay = 1_000 * 2 ** attempt + Math.random() * 400;
+    await new Promise(r => setTimeout(r, delay));
+  }
+}
+
 // Parse the AVM valuation object out of a OneRoof property page.
 // OneRoof uses Next.js RSC streaming: all data is in self.__next_f.push([1,"..."])
 // script blocks.  The avm object has been confirmed in RSC block 38 of 54 for
@@ -141,7 +154,7 @@ async function fetchOneRoof(address) {
 
   let searchData;
   try {
-    const resp = await fetchWithTimeout(searchUrl, { headers: await orHeaders(searchUrl) });
+    const resp = await fetchWithBackoff(searchUrl, { headers: await orHeaders(searchUrl) });
     if (!resp.ok) throw new Error(`OneRoof search request failed (HTTP ${resp.status})`);
     searchData = await resp.json();
   } catch (err) {
@@ -247,7 +260,7 @@ async function fetchPropertyValue(address) {
 
   let propertyId;
   try {
-    const resp = await fetchWithTimeout(suggestUrl);
+    const resp = await fetchWithBackoff(suggestUrl);
     if (!resp.ok) throw new Error(`PropertyValue request failed (HTTP ${resp.status})`);
     const data = await resp.json();
     const suggestions = data.suggestions ?? [];
@@ -273,8 +286,8 @@ async function fetchPropertyValue(address) {
   let detail, pvPath;
   try {
     const [detailResp, pvUrlResp] = await Promise.all([
-      fetchWithTimeout(detailUrl),
-      fetchWithTimeout(pvUrlUrl),
+      fetchWithBackoff(detailUrl),
+      fetchWithBackoff(pvUrlUrl),
     ]);
     if (!detailResp.ok) throw new Error(`PropertyValue request failed (HTTP ${detailResp.status})`);
     detail  = await detailResp.json();
@@ -311,14 +324,21 @@ async function fetchPropertyValue(address) {
 
 // ─── Message listener ────────────────────────────────────────────────────
 // Listens for { type: "FETCH_VALUATIONS", address: { streetAddress, suburb,
-// city, fullAddress } } sent from content.js, runs all three fetchers in
-// parallel, and replies with the combined results array.
+// city, fullAddress } } sent from content.js.
+//
+// Partial results: as each fetcher resolves it sends a VALUATION_UPDATE
+// message directly to the originating tab so the panel can update
+// immediately without waiting for all three sources.
+//
+// Final response: once all fetchers settle, results are cached and the
+// original sendResponse is called with the full array.
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type !== 'FETCH_VALUATIONS') return false;
 
   const { address } = message;
   const cacheKey = address.fullAddress;
+  const tabId    = sender.tab?.id ?? null;
 
   // Return cached results immediately if still fresh
   const cached = getCached(cacheKey);
@@ -328,13 +348,26 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return false;
   }
 
-  // Run all three fetchers in parallel; allSettled ensures one failure
-  // does not block the others
-  Promise.allSettled([
+  const fetches = [
     fetchOneRoof(address),
     fetchHomes(address),
     fetchPropertyValue(address),
-  ]).then(outcomes => {
+  ];
+
+  // Stream each result to the tab as soon as it settles so the panel can
+  // show partial results without waiting for the slowest source.
+  if (tabId != null) {
+    fetches.forEach(p => {
+      p.then(result => {
+        chrome.tabs.sendMessage(tabId, { type: 'VALUATION_UPDATE', result })
+          .catch(() => {}); // tab may have navigated away
+      });
+    });
+  }
+
+  // When all fetchers have settled: cache everything and send the final
+  // response (which triggers retry-button wiring and all-failed detection).
+  Promise.allSettled(fetches).then(outcomes => {
     const results = outcomes.map(outcome => {
       if (outcome.status === 'fulfilled') return outcome.value;
       return {
@@ -354,3 +387,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   // Return true to keep the message channel open until sendResponse is called
   return true;
 });
+
+// ─── Tab lifecycle ────────────────────────────────────────────────────────
+// The extension holds no per-tab state today.  The content script cleans up
+// its own timers and observers via the window 'beforeunload' event.
+// If per-tab fetch cancellation is ever needed, add "tabs" to the manifest
+// permissions and listen to chrome.tabs.onRemoved here.

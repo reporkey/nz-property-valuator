@@ -15,77 +15,62 @@
 (() => {
   'use strict';
 
-  const LOG = '[NZ-Valuator]';
-  const TIMEOUT_MS  = 10_000;   // give up after 10 s
+  const LOG         = '[NZ-Valuator]';
+  const TIMEOUT_MS  = 10_000;   // give up address extraction after 10 s
   const INTERVAL_MS = 300;      // poll every 300 ms
 
-  // Sources displayed in the panel (homes.co.nz excluded by design).
+  // Sources shown in the panel (homes.co.nz excluded by design).
   const SOURCES = ['OneRoof', 'PropertyValue'];
 
-  // ─── Strategy 1: JSON-LD ───────────────────────────────────────────────────
+  // ─── Module state ─────────────────────────────────────────────────────────
+  let currentShadow = null;   // shadow root of the active panel
+  let pollTimer     = null;   // setTimeout handle for the active poll cycle
+  let pollStart     = 0;      // Date.now() when the current poll cycle began
+
+  // ─── Strategy 1: JSON-LD ──────────────────────────────────────────────────
   // TradeMe injects a <script type="application/ld+json"> with:
   //   @type: "RealEstateListing"
   //   mainEntity.address: { @type: "PostalAddress",
   //                         streetAddress, addressLocality, addressRegion }
-  // (address may also appear directly on the root object for other schemas)
   function extractFromJsonLd() {
     const scripts = document.querySelectorAll('script[type="application/ld+json"]');
     for (const script of scripts) {
       let data;
-      try {
-        data = JSON.parse(script.textContent);
-      } catch {
-        continue;
-      }
+      try { data = JSON.parse(script.textContent); } catch { continue; }
 
       const items = Array.isArray(data) ? data : [data];
       for (const item of items) {
-        // Check root-level address and nested mainEntity.address
         const addr = item.address || (item.mainEntity && item.mainEntity.address);
         if (!addr) continue;
-
         const streetAddress = (addr.streetAddress || '').trim();
         const suburb        = (addr.addressLocality || '').trim();
         const city          = (addr.addressRegion   || '').trim();
-
-        if (streetAddress) {
-          return { streetAddress, suburb, city };
-        }
+        if (streetAddress) return { streetAddress, suburb, city };
       }
     }
     return null;
   }
 
   // ─── Strategy 2: __NEXT_DATA__ ────────────────────────────────────────────
-  // Not used by TradeMe (Angular app), but kept for completeness.
+  // Not used by TradeMe (Angular app), kept for completeness.
   function extractFromNextData() {
     const script = document.getElementById('__NEXT_DATA__');
     if (!script) return null;
-
     let root;
-    try {
-      root = JSON.parse(script.textContent);
-    } catch {
-      return null;
-    }
+    try { root = JSON.parse(script.textContent); } catch { return null; }
 
     function walk(node, depth) {
       if (!node || typeof node !== 'object' || depth > 8) return null;
       if (Array.isArray(node)) {
         for (const child of node) {
-          const result = walk(child, depth + 1);
-          if (result) return result;
+          const r = walk(child, depth + 1);
+          if (r) return r;
         }
         return null;
       }
-
-      const streetAddress =
-        node.streetAddress || node.street || node.address1 || '';
-      const suburb =
-        node.suburb || node.addressLocality || node.locality || node.district || '';
-      const city =
-        node.city || node.addressRegion || node.region || '';
-
+      const streetAddress = node.streetAddress || node.street || node.address1 || '';
+      const suburb = node.suburb || node.addressLocality || node.locality || node.district || '';
+      const city   = node.city  || node.addressRegion   || node.region  || '';
       if (streetAddress) {
         return {
           streetAddress: String(streetAddress).trim(),
@@ -93,110 +78,91 @@
           city:          String(city).trim(),
         };
       }
-
       for (const value of Object.values(node)) {
-        const result = walk(value, depth + 1);
-        if (result) return result;
+        const r = walk(value, depth + 1);
+        if (r) return r;
       }
       return null;
     }
-
     return walk(root, 0);
   }
 
   // ─── Strategy 3: DOM fallback ─────────────────────────────────────────────
-  // TradeMe renders the full address string in an <h1> element (the `location`
-  // attribute from the listing data).  e.g. "123 Main Street, Ponsonby, Auckland"
-  // Additional selectors are kept for robustness.
+  // TradeMe renders the full address in an <h1>.
   function extractFromDom() {
     const selectors = [
-      '[data-testid*="address"]',
-      '[data-testid*="Address"]',
-      '[class*="property-address"]',
-      '[class*="propertyAddress"]',
-      '[class*="listing-address"]',
-      'h1',
+      '[data-testid*="address"]', '[data-testid*="Address"]',
+      '[class*="property-address"]', '[class*="propertyAddress"]',
+      '[class*="listing-address"]', 'h1',
     ];
-
     for (const sel of selectors) {
       const el = document.querySelector(sel);
       if (!el) continue;
-      const text = el.textContent.trim();
+      const text  = el.textContent.trim();
       if (!text) continue;
-
-      // "123 Main Street, Ponsonby, Auckland" → split on comma
       const parts = text.split(',').map(p => p.trim()).filter(Boolean);
       if (parts.length >= 1) {
-        return {
-          streetAddress: parts[0] || '',
-          suburb:        parts[1] || '',
-          city:          parts[2] || '',
-        };
+        return { streetAddress: parts[0] || '', suburb: parts[1] || '', city: parts[2] || '' };
       }
     }
     return null;
   }
 
-  // ─── Normalize ────────────────────────────────────────────────────────────
   function normalize({ streetAddress, suburb, city }) {
     const parts = [streetAddress, suburb, city].filter(Boolean);
     return { streetAddress, suburb, city, fullAddress: parts.join(', ') };
   }
 
-  // ─── Single extraction attempt ────────────────────────────────────────────
   function tryExtract() {
-    let raw = null;
-    let source = null;
-
-    raw = extractFromJsonLd();
-    if (raw) {
-      source = 'JSON-LD';
-    } else {
-      raw = extractFromNextData();
-      if (raw) {
-        source = '__NEXT_DATA__';
-      } else {
-        raw = extractFromDom();
-        if (raw) source = 'DOM';
-      }
-    }
-
+    let raw = extractFromJsonLd();
+    let source = raw ? 'JSON-LD' : null;
+    if (!raw) { raw = extractFromNextData(); source = raw ? '__NEXT_DATA__' : null; }
+    if (!raw) { raw = extractFromDom();      source = raw ? 'DOM' : null; }
     if (!raw) return null;
-
     const address = normalize(raw);
     console.log(LOG, `Address extracted via ${source}:`, address);
     return address;
   }
 
-  // ─── Panel ────────────────────────────────────────────────────────────────
+  // ─── Panel HTML helpers ───────────────────────────────────────────────────
 
-  function buildPanelHTML() {
-    const cssUrl = chrome.runtime.getURL('panel.css');
-    const cards  = SOURCES.map(name => `
+  function buildCardHTML(name) {
+    return `
       <div class="nzvp-card" id="nzvp-card-${name}">
         <div class="nzvp-source-name">${name}</div>
         <div class="nzvp-estimate"><span class="nzvp-spinner"></span></div>
         <a class="nzvp-link" href="#" target="_blank" rel="noopener noreferrer" hidden>
           View on ${name} →
         </a>
-      </div>`).join('');
+      </div>`;
+  }
 
+  function buildPanelHTML() {
+    const cssUrl = chrome.runtime.getURL('panel.css');
     return `
       <link rel="stylesheet" href="${cssUrl}">
       <div class="nzvp-panel">
         <header class="nzvp-header" id="nzvp-header">
-          <span class="nzvp-title">🏠 Property Valuations</span>
+          <div class="nzvp-header-text">
+            <span class="nzvp-title">🏠 Property Valuations</span>
+            <span class="nzvp-subtitle" id="nzvp-subtitle">Detecting address…</span>
+          </div>
           <button class="nzvp-toggle" aria-expanded="true" aria-label="Toggle panel">▾</button>
         </header>
         <div class="nzvp-body" id="nzvp-body">
-          <div class="nzvp-cards">${cards}</div>
+          <div class="nzvp-cards" id="nzvp-cards">
+            ${SOURCES.map(buildCardHTML).join('')}
+          </div>
         </div>
         <footer class="nzvp-footer">Powered by NZ Property Valuator</footer>
       </div>`;
   }
 
-  // Returns the shadow root (creating the host element and inserting it into
-  // the page if it doesn't already exist).
+  // ─── Panel injection ──────────────────────────────────────────────────────
+  // Inserts at document.body.prepend immediately (before Angular renders) so
+  // the user sees the panel in loading state right away.  relocatePanel()
+  // moves it to a better position once Angular has rendered the property page.
+
   function injectPanel() {
     const existing = document.getElementById('nz-valuator-host');
     if (existing) return existing.shadowRoot;
@@ -206,7 +172,7 @@
     const shadow = host.attachShadow({ mode: 'open' });
     shadow.innerHTML = buildPanelHTML();
 
-    // ── Collapse / expand toggle ────────────────────────────────────────────
+    // Collapse / expand toggle
     const header = shadow.getElementById('nzvp-header');
     const toggle = shadow.querySelector('.nzvp-toggle');
     const body   = shadow.getElementById('nzvp-body');
@@ -216,43 +182,101 @@
       toggle.setAttribute('aria-expanded', String(!collapsed));
     });
 
-    // ── Find insertion point ────────────────────────────────────────────────
-    // Prefer known TradeMe structural elements; fall back to h1 or page top.
-    const anchorSelectors = [
-      'tm-property-homes-estimate',       // HomesEstimate Angular component
+    document.body.prepend(host);
+    return shadow;
+  }
+
+  // Move the panel to a better location once Angular has rendered the page.
+  function relocatePanel() {
+    const host = document.getElementById('nz-valuator-host');
+    if (!host) return;
+
+    const anchors = [
+      'tm-property-homes-estimate',
       '[data-testid*="homes"]',
       '[class*="homes-estimate"]',
       '[class*="HomesEstimate"]',
       '[class*="listing-header"]',
       '[class*="property-header"]',
     ];
-
-    let inserted = false;
-    for (const sel of anchorSelectors) {
+    for (const sel of anchors) {
       const el = document.querySelector(sel);
-      if (el) {
-        el.insertAdjacentElement('afterend', host);
-        inserted = true;
-        break;
-      }
+      if (el) { el.insertAdjacentElement('afterend', host); return; }
     }
-
-    if (!inserted) {
-      const h1 = document.querySelector('h1');
-      if (h1) {
-        h1.insertAdjacentElement('afterend', host);
-      } else {
-        const main = document.querySelector('main') || document.body;
-        main.insertAdjacentElement('afterbegin', host);
-      }
-    }
-
-    return shadow;
+    const h1 = document.querySelector('h1');
+    if (h1) h1.insertAdjacentElement('afterend', host);
+    // else leave at body top — already in place
   }
 
-  // ─── Card state updater ───────────────────────────────────────────────────
+  // ─── Panel state helpers ──────────────────────────────────────────────────
 
-  // Sets one card to LOADING (result = null), SUCCESS, NOT_FOUND, or ERROR.
+  function setSubtitle(shadow, text) {
+    const sub = shadow.getElementById('nzvp-subtitle');
+    if (!sub) return;
+    if (text) { sub.textContent = text; sub.hidden = false; }
+    else      { sub.hidden = true; }
+  }
+
+  // Replace the cards grid with a "could not detect" message + manual input.
+  function showNoAddressState(shadow) {
+    setSubtitle(shadow, null);
+    const cardsEl = shadow.getElementById('nzvp-cards');
+    if (!cardsEl) return;
+
+    cardsEl.innerHTML = `
+      <div class="nzvp-no-address">
+        <p class="nzvp-no-addr-msg">Could not detect property address.</p>
+        <div class="nzvp-manual-input">
+          <input class="nzvp-addr-input" type="text"
+                 placeholder="e.g. 10 Mahoe Ave, Remuera, Auckland"
+                 aria-label="Property address">
+          <button class="nzvp-search-btn">Search</button>
+        </div>
+      </div>`;
+
+    const input = cardsEl.querySelector('.nzvp-addr-input');
+    const btn   = cardsEl.querySelector('.nzvp-search-btn');
+
+    function doSearch() {
+      const text = input.value.trim();
+      if (!text) return;
+      // Rebuild cards and kick off a live fetch for the typed address.
+      cardsEl.innerHTML = SOURCES.map(buildCardHTML).join('');
+      const address = { streetAddress: text, suburb: '', city: '', fullAddress: text };
+      requestValuations(address);
+    }
+
+    btn.addEventListener('click', doSearch);
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+  }
+
+  // Prepend an "all failed" banner inside the panel body.
+  function showAllFailedState(shadow, address) {
+    const body = shadow.getElementById('nzvp-body');
+    if (!body) return;
+    body.querySelector('.nzvp-all-failed')?.remove();
+
+    const banner = document.createElement('div');
+    banner.className = 'nzvp-all-failed';
+    banner.innerHTML = `
+      <span>Unable to fetch valuations. Check your internet connection.</span>
+      <button class="nzvp-retry-all">Retry all</button>`;
+
+    banner.querySelector('.nzvp-retry-all').addEventListener('click', () => {
+      banner.remove();
+      for (const source of SOURCES) setCardState(shadow, source, null);
+      requestValuations(address);
+    });
+
+    body.prepend(banner);
+  }
+
+  // ─── Card state ───────────────────────────────────────────────────────────
+
+  // result = null  → LOADING (spinner)
+  // result.estimate → SUCCESS (green)
+  // result.error matches /not found|not available/  → NOT_FOUND (grey)
+  // result.error (other) → ERROR (orange)
   function setCardState(shadow, sourceName, result) {
     const card = shadow.getElementById(`nzvp-card-${sourceName}`);
     if (!card) return;
@@ -262,47 +286,50 @@
     card.querySelector('.nzvp-retry')?.remove();
 
     if (!result) {
-      // LOADING
-      estimateEl.className = 'nzvp-estimate';
+      estimateEl.className  = 'nzvp-estimate';
       estimateEl.innerHTML  = '<span class="nzvp-spinner"></span>';
       linkEl.hidden = true;
       return;
     }
 
     if (result.estimate) {
-      // SUCCESS
       estimateEl.className  = 'nzvp-estimate nzvp-success';
       estimateEl.textContent = result.estimate;
-      if (result.url) {
-        linkEl.href   = result.url;
-        linkEl.hidden = false;
-      }
+      if (result.url) { linkEl.href = result.url; linkEl.hidden = false; }
     } else if (!result.error || /not found|not available/i.test(result.error)) {
-      // NOT_FOUND
       estimateEl.className  = 'nzvp-estimate nzvp-not-found';
       estimateEl.textContent = 'No estimate';
       linkEl.hidden = true;
     } else {
-      // ERROR
       estimateEl.className  = 'nzvp-estimate nzvp-error-state';
       estimateEl.textContent = 'Failed to load';
       linkEl.hidden = true;
     }
   }
 
-  // Applies a full results array to all cards, then attaches retry buttons
-  // to any card that ended up in the ERROR state.
+  // Apply a full results array; wire retry buttons; detect all-sources-failed.
   function applyResults(shadow, results, address) {
-    // Remove stale retry buttons before re-evaluating states.
+    // Remove stale retry buttons and the all-failed banner before re-evaluating.
     shadow.querySelectorAll('.nzvp-retry').forEach(btn => btn.remove());
+    shadow.querySelector('.nzvp-all-failed')?.remove();
 
     for (const result of results) {
-      if (SOURCES.includes(result.source)) {
-        setCardState(shadow, result.source, result);
-      }
+      if (SOURCES.includes(result.source)) setCardState(shadow, result.source, result);
     }
 
-    // Attach retry buttons to error cards.
+    // If every displayed source is in the error state, show the all-failed banner.
+    const allFailed = SOURCES.every(source =>
+      shadow.getElementById(`nzvp-card-${source}`)
+            ?.querySelector('.nzvp-estimate')
+            ?.classList.contains('nzvp-error-state')
+    );
+
+    if (allFailed) {
+      showAllFailedState(shadow, address);
+      return; // no per-card retry buttons alongside the all-failed banner
+    }
+
+    // Per-card retry buttons for individual errors.
     for (const sourceName of SOURCES) {
       const card = shadow.getElementById(`nzvp-card-${sourceName}`);
       if (!card) continue;
@@ -313,16 +340,25 @@
       retryBtn.className   = 'nzvp-retry';
       retryBtn.textContent = 'Retry';
       retryBtn.addEventListener('click', () => {
-        setCardState(shadow, sourceName, null); // show spinner on this card
-        requestValuations(address, shadow);
+        setCardState(shadow, sourceName, null);
+        requestValuations(address);
       });
       card.appendChild(retryBtn);
     }
   }
 
-  // ─── Background messaging ─────────────────────────────────────────────────
+  // ─── Messaging ────────────────────────────────────────────────────────────
 
-  function requestValuations(address, shadow) {
+  // Receive incremental VALUATION_UPDATE messages streamed from background.js
+  // as each source resolves, so cards update as data arrives.
+  chrome.runtime.onMessage.addListener(message => {
+    if (message.type !== 'VALUATION_UPDATE') return;
+    if (!currentShadow) return;
+    const { result } = message;
+    if (SOURCES.includes(result.source)) setCardState(currentShadow, result.source, result);
+  });
+
+  function requestValuations(address) {
     chrome.runtime.sendMessage(
       { type: 'FETCH_VALUATIONS', address },
       response => {
@@ -336,32 +372,80 @@
         }
         const tag = response.fromCache ? '(cached)' : '(live)';
         console.log(LOG, `Valuations received ${tag}:`, response.results);
-        if (shadow) applyResults(shadow, response.results, address);
+        if (currentShadow) applyResults(currentShadow, response.results, address);
       }
     );
   }
 
-  // ─── Main — poll until Angular has rendered ───────────────────────────────
-  // TradeMe bootstraps Angular asynchronously; the JSON-LD script and DOM
-  // content are inserted well after document_idle fires.
-  const startTime = Date.now();
+  // ─── Polling ──────────────────────────────────────────────────────────────
 
-  function poll() {
-    const address = tryExtract();
-    if (address) {
-      const shadow = injectPanel();   // show panel with spinners immediately
-      requestValuations(address, shadow);
-      return;
-    }
-
-    if (Date.now() - startTime >= TIMEOUT_MS) {
-      console.log(LOG, 'Address extraction timed out — Angular may not have rendered yet');
-      return;
-    }
-
-    setTimeout(poll, INTERVAL_MS);
+  function startPolling() {
+    if (pollTimer !== null) { clearTimeout(pollTimer); pollTimer = null; }
+    pollStart = Date.now();
+    schedulePoll();
   }
 
-  poll();
+  function schedulePoll() {
+    pollTimer = setTimeout(doPoll, INTERVAL_MS);
+  }
+
+  function doPoll() {
+    pollTimer = null;
+    const address = tryExtract();
+    if (address) {
+      relocatePanel();
+      setSubtitle(currentShadow, null);     // hide "Detecting address…"
+      requestValuations(address);
+      return;
+    }
+    if (Date.now() - pollStart >= TIMEOUT_MS) {
+      console.log(LOG, 'Address extraction timed out — showing manual input');
+      showNoAddressState(currentShadow);
+      return;
+    }
+    schedulePoll();
+  }
+
+  // ─── SPA navigation ───────────────────────────────────────────────────────
+  // TradeMe uses Angular's pushState router.  Patch history.pushState /
+  // replaceState and listen for popstate so we restart on every navigation.
+
+  let lastUrl = location.href;
+
+  function handleNavigation() {
+    if (location.href === lastUrl) return; // replaceState with the same URL
+    lastUrl = location.href;
+
+    console.log(LOG, 'SPA navigation detected, restarting:', location.href);
+
+    // Tear down the old panel.
+    document.getElementById('nz-valuator-host')?.remove();
+    currentShadow = null;
+
+    // Start fresh — inject panel with loading state, then re-poll.
+    currentShadow = injectPanel();
+    setSubtitle(currentShadow, 'Detecting address…');
+    startPolling();
+  }
+
+  ['pushState', 'replaceState'].forEach(method => {
+    const original = history[method].bind(history);
+    history[method] = (...args) => { original(...args); handleNavigation(); };
+  });
+  window.addEventListener('popstate', handleNavigation);
+
+  // ─── Cleanup ──────────────────────────────────────────────────────────────
+
+  window.addEventListener('beforeunload', () => {
+    if (pollTimer !== null) { clearTimeout(pollTimer); pollTimer = null; }
+  });
+
+  // ─── Bootstrap ────────────────────────────────────────────────────────────
+  // Show the panel immediately in loading state so the user knows the
+  // extension is active, even before Angular has rendered the listing data.
+
+  currentShadow = injectPanel();
+  setSubtitle(currentShadow, 'Detecting address…');
+  startPolling();
 
 })();
