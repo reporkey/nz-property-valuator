@@ -34,10 +34,11 @@ function setCached(fullAddress, results) {
 // Source keys must match the `source` field returned by each fetcher.
 // Defaults are read from chrome.storage.sync; used as fallback if unavailable.
 
-const DISPLAYED_SOURCES = ['OneRoof', 'PropertyValue'];
+const DISPLAYED_SOURCES = ['OneRoof', 'homes.co.nz', 'PropertyValue'];
 
 const DEFAULT_SOURCE_SETTINGS = {
   OneRoof:       { enabled: true },
+  'homes.co.nz': { enabled: true },
   PropertyValue: { enabled: true },
 };
 
@@ -251,16 +252,15 @@ async function fetchOneRoof(address) {
 }
 
 // ─── homes.co.nz fetcher ─────────────────────────────────────────────────
-// Placeholder — homes.co.nz was removed from the active research as a data
-// source.  Stub retained so the plumbing can be wired up or swapped later.
+// STUB — real scraping logic to be added after researching the site.
+// Returns mock data after a simulated 1 s network delay.
 
 async function fetchHomes(address) {
-  // STUB — returns mock data after a simulated 1 s network delay
-  await new Promise(resolve => setTimeout(resolve, 1000));
+  await new Promise(resolve => setTimeout(resolve, 1_000));
 
   return {
     source:     'homes.co.nz',
-    estimate:   '$820,000 – $900,000',
+    estimate:   '$820K – $900K',
     url:        'https://homes.co.nz/',
     confidence: 'medium',
     error:      null,
@@ -385,7 +385,7 @@ function runFetchers(address, sources, tabId, sendResponse) {
 
   const fetches = [
     enabled('OneRoof')       ? fetchOneRoof(address)      : Promise.resolve(disabledResult('OneRoof')),
-    fetchHomes(address),     // stub, never shown in the panel
+    enabled('homes.co.nz')   ? fetchHomes(address)        : Promise.resolve(disabledResult('homes.co.nz')),
     enabled('PropertyValue') ? fetchPropertyValue(address) : Promise.resolve(disabledResult('PropertyValue')),
   ];
 
