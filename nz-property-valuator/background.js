@@ -287,20 +287,34 @@ function pvFormatEstimate(lowerBand, upperBand) {
 
 async function fetchPropertyValue(address) {
   // ── Step 1: Autocomplete → propertyId ────────────────────────────────────
-  const suggestUrl = `${PV_BASE_URL}/api/public/clapi/suggestions` +
-    `?q=${encodeURIComponent(address.fullAddress)}&suggestionTypes=address&limit=5`;
+  // PropertyValue's suggestions API returns 404 for some suburb+city
+  // combinations (e.g. "Red Beach, Auckland") but succeeds when the city is
+  // omitted.  Try progressively shorter queries until we get a 200 with hits.
+  const pvSuggestQueries = [
+    address.fullAddress,                                         // street + suburb + city
+    [address.streetAddress, address.suburb].filter(Boolean).join(', '), // street + suburb
+    address.streetAddress,                                       // street only
+  ].filter((q, i, arr) => q && arr.indexOf(q) === i);           // deduplicate
 
   let propertyId;
   try {
-    const resp = await fetchWithBackoff(suggestUrl);
-    if (!resp.ok) throw new Error(`PropertyValue request failed (HTTP ${resp.status})`);
-    const data = await resp.json();
-    const suggestions = data.suggestions ?? [];
-    if (suggestions.length === 0) {
+    let found = false;
+    for (const q of pvSuggestQueries) {
+      const url  = `${PV_BASE_URL}/api/public/clapi/suggestions` +
+        `?q=${encodeURIComponent(q)}&suggestionTypes=address&limit=5`;
+      const resp = await fetchWithBackoff(url);
+      if (!resp.ok) continue;                   // try next query variant
+      const data        = await resp.json();
+      const suggestions = data.suggestions ?? [];
+      if (suggestions.length === 0) continue;   // no hits, try shorter query
+      propertyId = suggestions[0].propertyId;
+      found = true;
+      break;
+    }
+    if (!found) {
       return { source: 'PropertyValue', estimate: null, url: null, confidence: null,
                error: 'Address not found on PropertyValue' };
     }
-    propertyId = suggestions[0].propertyId;
   } catch (err) {
     return {
       source:     'PropertyValue',
