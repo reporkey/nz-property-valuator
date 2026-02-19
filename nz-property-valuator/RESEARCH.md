@@ -35,19 +35,48 @@ https://www.oneroof.co.nz/estimate/map/region_all-new-zealand-1
 # Official OpenAPI docs (JS-rendered Swagger/ReDoc UI — open in browser):
 https://docs.oneroof.co.nz/openapi/index.html
 
-# No plain XHR endpoints detected via static HTML inspection.
-# The site uses Next.js React Server Components (RSC): all property and valuation
-# data is streamed as serialised JSON inside <script> tags of the form:
-#   self.__next_f.push([...])
-# There are NO separate REST/GraphQL XHR calls to intercept for the estimate value;
-# the data arrives inline with the page HTML.
+# ────────────────────────────────────────────────────────────────────
+# PUBLIC REST API — base URL:  https://www.oneroof.co.nz/v2.6/
+# All calls must include these request headers (reconstructed from bundle):
+#
+#   Authorization:          Public <base64("B41n73ivbk-w0W8OyEkm1-whmnE9w66e:ps4z1a4c5J-NpDc6ujX67-YNyBgX8D7o")>
+#   Timestamp:              <epoch milliseconds>
+#   Sign:                   <SHA-256 of (char_frequency_string + timestamp)>
+#   Content-Type:           application/json
+#   Client:                 web
+#   CF-Access-Client-Id:    6235e853dd3c95509c3a8568ac1de08b.access
+#   CF-Access-Client-Secret:7b1f7775f9c1158c683e21a3178eeafb164696c4da426c9b2e2917477f3457e0
+#
+# Sign algorithm (from module 6036 in layout chunk):
+#   1. Iterate chars of the full request URL string
+#   2. Keep only [a-zA-Z0-9]; track distinct chars in first-appearance order
+#   3. Build string: for each distinct char → char + total_count
+#   4. Append epoch_ms timestamp
+#   5. SHA-256 hex-digest of that string
+# ────────────────────────────────────────────────────────────────────
+
+# 1. Address autocomplete — PRIMARY ENDPOINT for property lookup
+GET /v2.6/address/search?isMix=1&key=<query>&typeId=-100
+# typeId=-100 is the Nn.estimate constant (module 69806); use for the estimate flow.
+# → {
+#     properties: [
+#       { id: 1363845, slug: "auckland/remuera/10-mahoe-avenue/qeHJ8",
+#         pureLabel: "10 Mahoe Avenue, Remuera, Auckland - City",
+#         lat: -36.869213, lng: 174.802073, level: "property" }
+#     ],
+#     schools: []
+#   }
+# Confirmed live: HTTP 200, public auth headers only (no login cookie needed).
+# The slug is the path fragment to build the property page URL:
+#   https://www.oneroof.co.nz/property/<slug>
+
+# 2. No direct estimate REST endpoint found.
+#    All valuation data is embedded in the Next.js RSC page HTML (see below).
+#    Fetching /v2.6/properties/<id> and /v2.6/estimate/<id> return HTTP 404.
 
 # Static assets / CDN:
-https://assets.oneroof.co.nz/...
-https://s.oneroof.co.nz/...
-
-# TODO: Open the estimate page in DevTools (Network → Fetch/XHR) while typing an
-# address to capture any autocomplete or property-lookup calls.
+https://assets.oneroof.co.nz/...   # JS/CSS bundles
+https://s.oneroof.co.nz/...        # Images; static-api-v2 CDN cache
 ```
 
 ### Property Page URL Pattern
@@ -70,24 +99,42 @@ https://www.oneroof.co.nz/property/auckland/westmere/80-warnock-street/RoHzS
 ### Valuation Estimate CSS Selector
 
 ```
-# ⚠️  No stable CSS selector found.
+# ⚠️  No CSS selector needed — parse RSC data from the page HTML directly.
 #
 # Valuation data (OneRoof estimate + low/high range + council RV) is embedded
-# inside Next.js RSC serialised state, not in a plain DOM element:
+# inside Next.js RSC serialised state, not in a stable DOM element.
+# All data arrives inline with the initial HTML before any JS runs:
 #
-#   self.__next_f.push([...large JSON blob...])
+#   self.__next_f.push([1, "...large JSON blob..."])
 #
-# Approach: parse the page HTML, extract the __next_f script blocks, JSON-parse
-# the payload, and walk the React component tree to find the estimate node.
+# Confirmed approach (no headless browser required):
+#   1. Autocomplete:  GET /v2.6/address/search?isMix=1&key=<addr>&typeId=-100
+#      → extract properties[0].slug  (e.g. "auckland/remuera/10-mahoe-avenue/qeHJ8")
+#   2. Property page: GET https://www.oneroof.co.nz/property/<slug>
+#      (plain fetch, no special headers, HTTP 200 confirmed with curl)
+#   3. Parse page HTML: extract all __next_f.push([1,"..."]) blocks, concatenate
+#      the JSON strings, search for the "avm":{...} object.
+#
+# Confirmed AVM object shape (property qeHJ8, live 2025-02):
+#   "avm": {
+#     "avm":            "$1,425,000",   // display string incl. $
+#     "high":           "$1,570,000",
+#     "low":            "$1,285,000",
+#     "rv":             "$1,500,000",   // council Rating Valuation
+#     "rvTime":         1714478400,     // RV date as Unix epoch
+#     "confidence":     4.5,            // 0–5 numeric score
+#     "confidenceScore":"High",         // "Low"|"Medium"|"High"
+#     "showAvm":        true
+#   }
+#
+# The "$" prefix and commas are display artefacts — strip them for arithmetic.
+# The avm field appears in RSC block 38 of 54 for property pages.
 #
 # Observed display format on property pages (e.g. qeHJ8):
 #   OneRoof estimate:  $1.43M  (labelled "High Accuracy")
 #   Low:               $1.29M
 #   High:              $1.57M
 #   Rating valuation:  $1.5M   (Auckland City Council, 2024)
-#
-# TODO: Confirm with DevTools whether a simpler selector exists after hydration,
-# e.g. something like [class*="estimate"] or [class*="valuation"].
 ```
 
 ### Anti-Scraping Measures
@@ -100,9 +147,10 @@ will include the data, but parsing it is non-trivial.
 - **No Cloudflare challenge** detected on basic property page fetches (as of research date).
 - **No login required** for viewing estimate data on public property pages.
 - **CDN assets** on separate origins (`assets.oneroof.co.nz`, `s.oneroof.co.nz`) —
-CORS policy on these is TODO; the main page HTML should be accessible without CORS issues.
-- TODO: Test whether a server-side `fetch()` (no browser headers) returns the full
-RSC payload or a stripped/bot-blocked response.
+CORS policy irrelevant; only the main HTML page and `/v2.6/` endpoints are fetched.
+- **Server-side `fetch()` confirmed working**: a plain `curl` with no browser headers
+returns HTTP 200 with the full RSC payload including AVM data (tested 2025-02, property
+qeHJ8). No bot challenge observed.
 
 ### Notes
 
