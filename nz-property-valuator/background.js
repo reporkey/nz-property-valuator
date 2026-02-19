@@ -221,23 +221,91 @@ async function fetchHomes(address) {
 }
 
 // ─── PropertyValue fetcher ───────────────────────────────────────────────
-// Live plan (see RESEARCH.md):
+// Flow:
 //   1. GET /api/public/clapi/suggestions?q=<fullAddress>&suggestionTypes=address&limit=5
 //      → suggestions[0].propertyId  (integer)
 //   2. GET /api/public/clapi/properties/<propertyId>
 //      → estimatedRange: { lowerBand, upperBand, confidence }
 //         ratingValuation: { capitalValue, valuationDate }
+//   3. GET /api/public/clapi/properties/propertyUrl?propertyId=<id>
+//      → plain string path  e.g. "/wellington/wellington-city/…/7120741"
+//
+// No auth required; Imperva WAF only guards the HTML layer.
+// Confidence mapping: "HIGH" → "high", "MEDIUM" → "medium", "LOW" → "low".
+
+const PV_BASE_URL = 'https://www.propertyvalue.co.nz';
+
+function pvFormatEstimate(lowerBand, upperBand) {
+  const fmt = n => '$' + Math.round(n).toLocaleString('en-NZ');
+  return `${fmt(lowerBand)} – ${fmt(upperBand)}`;
+}
 
 async function fetchPropertyValue(address) {
-  // STUB — returns mock data after a simulated 1 s network delay
-  await new Promise(resolve => setTimeout(resolve, 1000));
+  // ── Step 1: Autocomplete → propertyId ────────────────────────────────────
+  const suggestUrl = `${PV_BASE_URL}/api/public/clapi/suggestions` +
+    `?q=${encodeURIComponent(address.fullAddress)}&suggestionTypes=address&limit=5`;
+
+  let propertyId;
+  try {
+    const resp = await fetchWithTimeout(suggestUrl);
+    if (!resp.ok) throw new Error(`PropertyValue request failed (HTTP ${resp.status})`);
+    const data = await resp.json();
+    const suggestions = data.suggestions ?? [];
+    if (suggestions.length === 0) {
+      return { source: 'PropertyValue', estimate: null, url: null, confidence: null,
+               error: 'Address not found on PropertyValue' };
+    }
+    propertyId = suggestions[0].propertyId;
+  } catch (err) {
+    return {
+      source:     'PropertyValue',
+      estimate:   null,
+      url:        null,
+      confidence: null,
+      error:      /PropertyValue/.test(err.message) ? err.message : 'PropertyValue request failed',
+    };
+  }
+
+  // ── Step 2 & 3: Property detail + URL (in parallel) ───────────────────────
+  const detailUrl = `${PV_BASE_URL}/api/public/clapi/properties/${propertyId}`;
+  const pvUrlUrl  = `${PV_BASE_URL}/api/public/clapi/properties/propertyUrl?propertyId=${propertyId}`;
+
+  let detail, pvPath;
+  try {
+    const [detailResp, pvUrlResp] = await Promise.all([
+      fetchWithTimeout(detailUrl),
+      fetchWithTimeout(pvUrlUrl),
+    ]);
+    if (!detailResp.ok) throw new Error(`PropertyValue request failed (HTTP ${detailResp.status})`);
+    detail  = await detailResp.json();
+    pvPath  = pvUrlResp.ok ? (await pvUrlResp.text()).trim() : null;
+  } catch (err) {
+    return {
+      source:     'PropertyValue',
+      estimate:   null,
+      url:        null,
+      confidence: null,
+      error:      /PropertyValue/.test(err.message) ? err.message : 'PropertyValue request failed',
+    };
+  }
+
+  const range = detail.estimatedRange;
+  if (!range || range.lowerBand == null || range.upperBand == null) {
+    return { source: 'PropertyValue', estimate: null,
+             url: pvPath ? PV_BASE_URL + pvPath : null, confidence: null,
+             error: 'PropertyValue returned unexpected format' };
+  }
+
+  const confidenceMap = { HIGH: 'high', MEDIUM: 'medium', LOW: 'low' };
+  const confidence = confidenceMap[(range.confidence ?? '').toUpperCase()] ?? null;
+  const pageUrl    = pvPath ? PV_BASE_URL + pvPath : null;
 
   return {
-    source:     'PropertyValue',
-    estimate:   '$875,000',
-    url:        'https://www.propertyvalue.co.nz/',
-    confidence: 'high',
-    error:      null,
+    source:   'PropertyValue',
+    estimate: pvFormatEstimate(range.lowerBand, range.upperBand),
+    url:      pageUrl,
+    confidence,
+    error:    null,
   };
 }
 
