@@ -159,8 +159,10 @@ function parseOrAvm(html) {
   const str  = key => { const r = new RegExp(`"${key}"\\s*:\\s*"([^"]+)"`).exec(obj); return r?.[1] ?? null; };
   const bool = key => { const r = new RegExp(`"${key}"\\s*:\\s*(true|false)`).exec(obj); return r ? r[1] === 'true' : null; };
 
+  const rawEst = str('avm');
+  const n = rawEst ? Number(rawEst.replace(/[$,]/g, '')) : NaN;
   return {
-    estimate:        str('avm'),            // "$1,425,000"
+    estimate:        isFinite(n) && n > 0 ? fmtAmount(n) : (rawEst ?? null),
     confidenceScore: str('confidenceScore'), // "High"|"Medium"|"Low"
     showAvm:         bool('showAvm') ?? true,
   };
@@ -280,9 +282,14 @@ async function fetchHomes(address) {
 
 const PV_BASE_URL = 'https://www.propertyvalue.co.nz';
 
+// Format a dollar amount using K/M suffixes: 560000 → "$560K", 1425000 → "$1.43M".
+function fmtAmount(n) {
+  if (n >= 1_000_000) return '$' + parseFloat((n / 1_000_000).toFixed(2)) + 'M';
+  return '$' + Math.round(n / 1_000) + 'K';
+}
+
 function pvFormatEstimate(lowerBand, upperBand) {
-  const fmt = n => '$' + Math.round(n).toLocaleString('en-NZ');
-  return `${fmt(lowerBand)} – ${fmt(upperBand)}`;
+  return `${fmtAmount(lowerBand)} – ${fmtAmount(upperBand)}`;
 }
 
 async function fetchPropertyValue(address) {

@@ -128,7 +128,7 @@
 /* ── Estimate states ─────────────────────────────────────────────────────── */
 
 .nzvp-estimate {
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 700;
   min-height: 30px;
   display: flex;
@@ -137,7 +137,7 @@
 }
 
 .nzvp-estimate.nzvp-success {
-  color: #2a9d5c;
+  color: #111111;
 }
 
 .nzvp-estimate.nzvp-not-found {
