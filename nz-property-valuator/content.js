@@ -6,14 +6,25 @@
  *
  * Runs at: document_idle
  * Matches:  https://www.trademe.co.nz/a/*
+ *
+ * TradeMe is a fully client-side Angular SPA.
+ * JSON-LD and DOM content are injected dynamically after bootstrap, so we
+ * observe the DOM and retry until the address is found or a timeout is hit.
  */
 
 (() => {
   'use strict';
 
   const LOG = '[NZ-Valuator]';
+  const TIMEOUT_MS  = 10_000;   // give up after 10 s
+  const INTERVAL_MS = 300;      // poll every 300 ms
 
   // ─── Strategy 1: JSON-LD ───────────────────────────────────────────────────
+  // TradeMe injects a <script type="application/ld+json"> with:
+  //   @type: "RealEstateListing"
+  //   mainEntity.address: { @type: "PostalAddress",
+  //                         streetAddress, addressLocality, addressRegion }
+  // (address may also appear directly on the root object for other schemas)
   function extractFromJsonLd() {
     const scripts = document.querySelectorAll('script[type="application/ld+json"]');
     for (const script of scripts) {
@@ -24,10 +35,10 @@
         continue;
       }
 
-      // Handle both a single object and an array of objects
       const items = Array.isArray(data) ? data : [data];
       for (const item of items) {
-        const addr = item.address;
+        // Check root-level address and nested mainEntity.address
+        const addr = item.address || (item.mainEntity && item.mainEntity.address);
         if (!addr) continue;
 
         const streetAddress = (addr.streetAddress || '').trim();
@@ -43,6 +54,7 @@
   }
 
   // ─── Strategy 2: __NEXT_DATA__ ────────────────────────────────────────────
+  // Not used by TradeMe (Angular app), but kept for completeness.
   function extractFromNextData() {
     const script = document.getElementById('__NEXT_DATA__');
     if (!script) return null;
@@ -54,8 +66,6 @@
       return null;
     }
 
-    // Walk the parsed object looking for address-shaped leaves.
-    // TradeMe may nest address under props.pageProps.listing or similar.
     function walk(node, depth) {
       if (!node || typeof node !== 'object' || depth > 8) return null;
       if (Array.isArray(node)) {
@@ -66,7 +76,6 @@
         return null;
       }
 
-      // Look for common address key patterns
       const streetAddress =
         node.streetAddress || node.street || node.address1 || '';
       const suburb =
@@ -93,6 +102,9 @@
   }
 
   // ─── Strategy 3: DOM fallback ─────────────────────────────────────────────
+  // TradeMe renders the full address string in an <h1> element (the `location`
+  // attribute from the listing data).  e.g. "123 Main Street, Ponsonby, Auckland"
+  // Additional selectors are kept for robustness.
   function extractFromDom() {
     const selectors = [
       '[data-testid*="address"]',
@@ -109,7 +121,7 @@
       const text = el.textContent.trim();
       if (!text) continue;
 
-      // Best-effort split: "123 Main Street, Ponsonby, Auckland"
+      // "123 Main Street, Ponsonby, Auckland" → split on comma
       const parts = text.split(',').map(p => p.trim()).filter(Boolean);
       if (parts.length >= 1) {
         return {
@@ -125,12 +137,11 @@
   // ─── Normalize ────────────────────────────────────────────────────────────
   function normalize({ streetAddress, suburb, city }) {
     const parts = [streetAddress, suburb, city].filter(Boolean);
-    const fullAddress = parts.join(', ');
-    return { streetAddress, suburb, city, fullAddress };
+    return { streetAddress, suburb, city, fullAddress: parts.join(', ') };
   }
 
-  // ─── Main ─────────────────────────────────────────────────────────────────
-  function extractAddress() {
+  // ─── Single extraction attempt ────────────────────────────────────────────
+  function tryExtract() {
     let raw = null;
     let source = null;
 
@@ -147,16 +158,30 @@
       }
     }
 
-    if (!raw) {
-      console.log(LOG, 'Address extraction failed — no strategy matched');
-      return null;
-    }
+    if (!raw) return null;
 
     const address = normalize(raw);
     console.log(LOG, `Address extracted via ${source}:`, address);
     return address;
   }
 
-  extractAddress();
+  // ─── Main — poll until Angular has rendered ───────────────────────────────
+  // TradeMe bootstraps Angular asynchronously; the JSON-LD script and DOM
+  // content are inserted well after document_idle fires.
+  const startTime = Date.now();
+
+  function poll() {
+    const result = tryExtract();
+    if (result) return;   // done
+
+    if (Date.now() - startTime >= TIMEOUT_MS) {
+      console.log(LOG, 'Address extraction timed out — Angular may not have rendered yet');
+      return;
+    }
+
+    setTimeout(poll, INTERVAL_MS);
+  }
+
+  poll();
 
 })();
