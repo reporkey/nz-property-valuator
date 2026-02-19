@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "Overlay property valuation data on NZ real estate listing pages.",
 
-  "permissions": ["activeTab"],
+  "permissions": ["activeTab", "storage"],
 
   "host_permissions": [
     "https://www.trademe.co.nz/*",

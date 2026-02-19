@@ -30,6 +30,38 @@ function setCached(fullAddress, results) {
   cache.set(fullAddress, { timestamp: Date.now(), results });
 }
 
+// ─── Settings ─────────────────────────────────────────────────────────────
+// Source keys must match the `source` field returned by each fetcher.
+// Defaults are read from chrome.storage.sync; used as fallback if unavailable.
+
+const DISPLAYED_SOURCES = ['OneRoof', 'PropertyValue'];
+
+const DEFAULT_SOURCE_SETTINGS = {
+  OneRoof:       { enabled: true },
+  PropertyValue: { enabled: true },
+};
+
+function disabledResult(source) {
+  return { source, estimate: null, url: null, confidence: null, error: null, disabled: true };
+}
+
+// Persist the last fetch outcome for each displayed source so the popup can
+// show per-source status without re-fetching.
+async function recordFetchStatus(results) {
+  const update = {};
+  for (const result of results) {
+    if (!DISPLAYED_SOURCES.includes(result.source)) continue;
+    update[result.source] = {
+      ok:       !!result.estimate,
+      estimate: result.estimate ?? null,
+      error:    result.error    ?? null,
+      ts:       Date.now(),
+    };
+  }
+  const { fetchStatus = {} } = await chrome.storage.local.get({ fetchStatus: {} });
+  await chrome.storage.local.set({ fetchStatus: { ...fetchStatus, ...update } });
+}
+
 // ─── OneRoof auth helpers ─────────────────────────────────────────────────
 // Credentials extracted from the public JS bundle (module 6036 in layout
 // chunk).  All are embedded in the production app and are intentionally
@@ -323,35 +355,17 @@ async function fetchPropertyValue(address) {
 }
 
 // ─── Message listener ────────────────────────────────────────────────────
-// Listens for { type: "FETCH_VALUATIONS", address: { streetAddress, suburb,
-// city, fullAddress } } sent from content.js.
-//
-// Partial results: as each fetcher resolves it sends a VALUATION_UPDATE
-// message directly to the originating tab so the panel can update
-// immediately without waiting for all three sources.
-//
-// Final response: once all fetchers settle, results are cached and the
-// original sendResponse is called with the full array.
+// Handles two message types:
+//   FETCH_VALUATIONS — run enabled fetchers, stream partial results, cache.
+//   CLEAR_CACHE      — wipe the in-memory cache (sent from popup).
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type !== 'FETCH_VALUATIONS') return false;
-
-  const { address } = message;
-  const cacheKey = address.fullAddress;
-  const tabId    = sender.tab?.id ?? null;
-
-  // Return cached results immediately if still fresh
-  const cached = getCached(cacheKey);
-  if (cached) {
-    console.log('[NZ-Valuator] Cache hit:', cacheKey);
-    sendResponse({ ok: true, results: cached, fromCache: true });
-    return false;
-  }
+function runFetchers(address, sources, tabId, sendResponse) {
+  const enabled = name => sources[name]?.enabled !== false;
 
   const fetches = [
-    fetchOneRoof(address),
-    fetchHomes(address),
-    fetchPropertyValue(address),
+    enabled('OneRoof')       ? fetchOneRoof(address)      : Promise.resolve(disabledResult('OneRoof')),
+    fetchHomes(address),     // stub, never shown in the panel
+    enabled('PropertyValue') ? fetchPropertyValue(address) : Promise.resolve(disabledResult('PropertyValue')),
   ];
 
   // Stream each result to the tab as soon as it settles so the panel can
@@ -365,8 +379,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     });
   }
 
-  // When all fetchers have settled: cache everything and send the final
-  // response (which triggers retry-button wiring and all-failed detection).
+  // When all fetchers have settled: cache, persist status, send final response.
   Promise.allSettled(fetches).then(outcomes => {
     const results = outcomes.map(outcome => {
       if (outcome.status === 'fulfilled') return outcome.value;
@@ -379,12 +392,44 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       };
     });
 
-    setCached(cacheKey, results);
-    console.log('[NZ-Valuator] Valuations fetched for:', cacheKey, results);
+    setCached(address.fullAddress, results);
+    recordFetchStatus(results); // fire-and-forget
+    console.log('[NZ-Valuator] Valuations fetched for:', address.fullAddress, results);
     sendResponse({ ok: true, results, fromCache: false });
   });
+}
 
-  // Return true to keep the message channel open until sendResponse is called
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // ── Clear cache ───────────────────────────────────────────────────────────
+  if (message.type === 'CLEAR_CACHE') {
+    cache.clear();
+    console.log('[NZ-Valuator] Cache cleared');
+    sendResponse({ ok: true });
+    return false;
+  }
+
+  if (message.type !== 'FETCH_VALUATIONS') return false;
+
+  const { address } = message;
+  const cacheKey    = address.fullAddress;
+  const tabId       = sender.tab?.id ?? null;
+
+  // Return cached results immediately if still fresh.
+  const cached = getCached(cacheKey);
+  if (cached) {
+    console.log('[NZ-Valuator] Cache hit:', cacheKey);
+    sendResponse({ ok: true, results: cached, fromCache: true });
+    return false;
+  }
+
+  // Read per-source enabled settings, then dispatch fetchers.
+  // Falls back to all-enabled defaults if storage is unavailable.
+  chrome.storage.sync
+    .get({ sources: DEFAULT_SOURCE_SETTINGS })
+    .then(({ sources }) => runFetchers(address, sources, tabId, sendResponse))
+    .catch(()           => runFetchers(address, DEFAULT_SOURCE_SETTINGS, tabId, sendResponse));
+
+  // Return true to keep the message channel open until sendResponse is called.
   return true;
 });
 

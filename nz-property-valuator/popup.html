@@ -1,31 +1,190 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>NZ Property Valuator</title>
   <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
     body {
-      font-family: system-ui, sans-serif;
-      width: 260px;
-      padding: 16px;
-      margin: 0;
-    }
-
-    h1 {
-      font-size: 15px;
-      margin: 0 0 8px;
-    }
-
-    #status {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       font-size: 13px;
-      color: #555;
+      color: #212529;
+      width: 300px;
+      background: #fff;
     }
+
+    /* ── Header ─────────────────────────────────────────────────────────── */
+
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 16px 12px;
+      border-bottom: 1px solid #e9ecef;
+    }
+
+    .header-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #212529;
+    }
+
+    .version {
+      font-size: 11px;
+      color: #adb5bd;
+    }
+
+    /* ── Section ─────────────────────────────────────────────────────────── */
+
+    .section {
+      padding: 12px 16px;
+      border-bottom: 1px solid #e9ecef;
+    }
+
+    .section-label {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: #adb5bd;
+      margin-bottom: 10px;
+    }
+
+    /* ── Source row ──────────────────────────────────────────────────────── */
+
+    .source-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 0;
+    }
+
+    .source-row + .source-row {
+      border-top: 1px solid #f1f3f5;
+    }
+
+    .source-name {
+      font-weight: 500;
+      flex: 0 0 100px;
+      color: #343a40;
+    }
+
+    .source-status {
+      flex: 1;
+      font-size: 12px;
+      color: #ced4da;
+      text-align: right;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .source-status.ok   { color: #2a9d5c; }
+    .source-status.fail { color: #e07b00; }
+    .source-status.none { color: #ced4da; }
+
+    /* ── Toggle switch ───────────────────────────────────────────────────── */
+
+    .toggle {
+      position: relative;
+      display: inline-block;
+      width: 36px;
+      height: 20px;
+      flex-shrink: 0;
+    }
+
+    .toggle input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+      position: absolute;
+    }
+
+    .toggle-track {
+      position: absolute;
+      inset: 0;
+      background: #dee2e6;
+      border-radius: 20px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .toggle-track::before {
+      content: '';
+      position: absolute;
+      width: 14px;
+      height: 14px;
+      left: 3px;
+      top: 3px;
+      background: #fff;
+      border-radius: 50%;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+      transition: transform 0.2s;
+    }
+
+    .toggle input:checked + .toggle-track            { background: #2a9d5c; }
+    .toggle input:checked + .toggle-track::before    { transform: translateX(16px); }
+    .toggle input:focus-visible + .toggle-track      { outline: 2px solid #4dabf7; outline-offset: 2px; }
+
+    /* ── Actions ─────────────────────────────────────────────────────────── */
+
+    .actions {
+      padding: 12px 16px;
+    }
+
+    .btn {
+      display: block;
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #dee2e6;
+      border-radius: 6px;
+      background: #fff;
+      font-size: 13px;
+      color: #495057;
+      cursor: pointer;
+      text-align: center;
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
+    }
+
+    .btn:hover  { background: #f8f9fa; border-color: #adb5bd; }
+    .btn:active { background: #e9ecef; }
+    .btn.done   { color: #2a9d5c; font-weight: 600; border-color: #c3e6d4; }
   </style>
 </head>
 <body>
-  <h1>NZ Property Valuator</h1>
-  <p id="status">Loading…</p>
+
+  <div class="header">
+    <span class="header-title">🏠 NZ Property Valuator</span>
+    <span class="version" id="version">v—</span>
+  </div>
+
+  <div class="section">
+    <div class="section-label">Sources</div>
+
+    <div class="source-row">
+      <span class="source-name">OneRoof</span>
+      <span class="source-status none" id="status-OneRoof">—</span>
+      <label class="toggle" aria-label="Enable OneRoof">
+        <input type="checkbox" id="toggle-OneRoof">
+        <span class="toggle-track"></span>
+      </label>
+    </div>
+
+    <div class="source-row">
+      <span class="source-name">PropertyValue</span>
+      <span class="source-status none" id="status-PropertyValue">—</span>
+      <label class="toggle" aria-label="Enable PropertyValue">
+        <input type="checkbox" id="toggle-PropertyValue">
+        <span class="toggle-track"></span>
+      </label>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button class="btn" id="clear-cache">Clear cache</button>
+  </div>
 
   <script src="popup.js"></script>
 </body>
