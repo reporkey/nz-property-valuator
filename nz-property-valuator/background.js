@@ -30,23 +30,175 @@ function setCached(fullAddress, results) {
   cache.set(fullAddress, { timestamp: Date.now(), results });
 }
 
+// ─── OneRoof auth helpers ─────────────────────────────────────────────────
+// Credentials extracted from the public JS bundle (module 6036 in layout
+// chunk).  All are embedded in the production app and are intentionally
+// public-facing.
+
+const OR_BASE_URL         = 'https://www.oneroof.co.nz';
+const OR_PUBLIC_KEY       = 'B41n73ivbk-w0W8OyEkm1-whmnE9w66e:ps4z1a4c5J-NpDc6ujX67-YNyBgX8D7o';
+const OR_CF_CLIENT_ID     = '6235e853dd3c95509c3a8568ac1de08b.access';
+const OR_CF_CLIENT_SECRET = '7b1f7775f9c1158c683e21a3178eeafb164696c4da426c9b2e2917477f3457e0';
+
+// SHA-256 hex digest using SubtleCrypto (available in MV3 service workers).
+async function sha256hex(str) {
+  const encoded = new TextEncoder().encode(str);
+  const buf     = await crypto.subtle.digest('SHA-256', encoded);
+  return Array.from(new Uint8Array(buf), b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// Sign algorithm (from module 6036, confirmed live):
+//   Iterate the full URL string; for each distinct [a-zA-Z0-9] char (in
+//   first-appearance order) emit char + total-count; append epoch ms; SHA-256.
+async function orSign(url, timestamp) {
+  const seen  = new Map();
+  const order = [];
+  for (const ch of url) {
+    if (/[a-zA-Z0-9]/.test(ch)) {
+      if (!seen.has(ch)) { seen.set(ch, 0); order.push(ch); }
+      seen.set(ch, seen.get(ch) + 1);
+    }
+  }
+  const payload = order.map(ch => ch + seen.get(ch)).join('') + timestamp;
+  return sha256hex(payload);
+}
+
+async function orHeaders(url) {
+  const ts = Date.now();
+  return {
+    'Authorization':           'Public ' + btoa(OR_PUBLIC_KEY),
+    'Timestamp':               String(ts),
+    'Sign':                    await orSign(url, ts),
+    'Content-Type':            'application/json',
+    'Client':                  'web',
+    'CF-Access-Client-Id':     OR_CF_CLIENT_ID,
+    'CF-Access-Client-Secret': OR_CF_CLIENT_SECRET,
+  };
+}
+
+// Fetch with an explicit timeout (AbortController, compatible with MV3).
+async function fetchWithTimeout(url, options = {}, timeoutMs = 10_000) {
+  const ctrl  = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: ctrl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Parse the AVM valuation object out of a OneRoof property page.
+// OneRoof uses Next.js RSC streaming: all data is in self.__next_f.push([1,"..."])
+// script blocks.  The avm object has been confirmed in RSC block 38 of 54 for
+// residential property pages.
+function parseOrAvm(html) {
+  // Collect and decode all RSC chunks.
+  // Each chunk is: self.__next_f.push([1,"<JSON-escaped string>"])
+  let allText = '';
+  const chunkRe = /self\.__next_f\.push\(\[1\s*,\s*"((?:[^"\\]|\\.)*)"\s*\]\)/g;
+  let m;
+  while ((m = chunkRe.exec(html)) !== null) {
+    try {
+      // JSON.parse('"..."') decodes the escape sequences (\", \\, \n, etc.)
+      allText += JSON.parse('"' + m[1] + '"');
+    } catch {
+      allText += m[1];
+    }
+  }
+
+  // Locate the outer "avm":{...} object (all values are primitives, no nesting).
+  const objMatch = /"avm"\s*:\s*(\{[^}]+\})/.exec(allText);
+  if (!objMatch) return null;
+  const obj = objMatch[1];
+
+  const str  = key => { const r = new RegExp(`"${key}"\\s*:\\s*"([^"]+)"`).exec(obj); return r?.[1] ?? null; };
+  const bool = key => { const r = new RegExp(`"${key}"\\s*:\\s*(true|false)`).exec(obj); return r ? r[1] === 'true' : null; };
+
+  return {
+    estimate:        str('avm'),            // "$1,425,000"
+    confidenceScore: str('confidenceScore'), // "High"|"Medium"|"Low"
+    showAvm:         bool('showAvm') ?? true,
+  };
+}
+
 // ─── OneRoof fetcher ──────────────────────────────────────────────────────
-// Live plan (see RESEARCH.md):
+// Flow:
 //   1. GET /v2.6/address/search?isMix=1&key=<fullAddress>&typeId=-100
-//      (signed with SHA-256 + public key headers)
+//      Signed with SHA-256 auth headers (public credentials from bundle).
 //      → properties[0].slug  e.g. "auckland/remuera/10-mahoe-avenue/qeHJ8"
 //   2. GET https://www.oneroof.co.nz/property/<slug>
-//      → parse __next_f RSC blocks → find "avm":{avm,high,low,rv,...}
+//      Plain fetch (no auth), returns full Next.js RSC HTML including AVM data.
+//      → parse __next_f RSC blocks → find "avm":{avm, confidenceScore, showAvm}
+//
+// Confidence reflects address-match quality, not AVM model accuracy:
+//   "high"   — first result's pureLabel starts with the searched street address
+//   "medium" — fuzzy / partial match
 
 async function fetchOneRoof(address) {
-  // STUB — returns mock data after a simulated 1 s network delay
-  await new Promise(resolve => setTimeout(resolve, 1000));
+  // ── Step 1: Resolve address to slug ───────────────────────────────────────
+  const searchUrl = `${OR_BASE_URL}/v2.6/address/search?isMix=1` +
+    `&key=${encodeURIComponent(address.fullAddress)}&typeId=-100`;
+
+  let searchData;
+  try {
+    const resp = await fetchWithTimeout(searchUrl, { headers: await orHeaders(searchUrl) });
+    if (!resp.ok) throw new Error(`OneRoof search request failed (HTTP ${resp.status})`);
+    searchData = await resp.json();
+  } catch (err) {
+    return {
+      source:     'OneRoof',
+      estimate:   null,
+      url:        null,
+      confidence: null,
+      error:      /OneRoof/.test(err.message) ? err.message : 'OneRoof request failed',
+    };
+  }
+
+  const properties = searchData.properties ?? [];
+  if (properties.length === 0) {
+    return { source: 'OneRoof', estimate: null, url: null, confidence: null,
+             error: 'Address not found on OneRoof' };
+  }
+
+  const best    = properties[0];
+  const slug    = best.slug;   // "auckland/remuera/10-mahoe-avenue/qeHJ8"
+  const pageUrl = `${OR_BASE_URL}/property/${slug}`;
+
+  // Confidence: does the top result's label start with our street address?
+  const norm = s => s.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+  const confidence = norm(best.pureLabel ?? '').startsWith(norm(address.streetAddress))
+    ? 'high' : 'medium';
+
+  // ── Step 2: Fetch property page and parse RSC AVM data ────────────────────
+  let html;
+  try {
+    const resp = await fetchWithTimeout(pageUrl, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible)' },
+    });
+    if (!resp.ok) throw new Error(`OneRoof page request failed (HTTP ${resp.status})`);
+    html = await resp.text();
+  } catch (err) {
+    return {
+      source: 'OneRoof', estimate: null, url: pageUrl, confidence,
+      error: /OneRoof/.test(err.message) ? err.message : 'OneRoof request failed',
+    };
+  }
+
+  const avm = parseOrAvm(html);
+  if (!avm) {
+    return { source: 'OneRoof', estimate: null, url: pageUrl, confidence,
+             error: 'OneRoof returned unexpected format' };
+  }
+  if (!avm.showAvm || !avm.estimate) {
+    return { source: 'OneRoof', estimate: null, url: pageUrl, confidence,
+             error: 'OneRoof estimate not available for this property' };
+  }
 
   return {
     source:     'OneRoof',
-    estimate:   '$850,000',
-    url:        'https://www.oneroof.co.nz/estimate/map/region_all-new-zealand-1',
-    confidence: 'high',
+    estimate:   avm.estimate,   // e.g. "$1,425,000"
+    url:        pageUrl,
+    confidence,
     error:      null,
   };
 }
