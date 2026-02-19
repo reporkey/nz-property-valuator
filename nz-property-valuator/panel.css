@@ -16,6 +16,10 @@
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.10), 0 1px 3px rgba(0, 0, 0, 0.06);
   overflow: hidden;
   max-width: 640px;
+  /* Enable container queries so the card grid responds to the panel's own
+     width, not the viewport — critical when the panel lands in a sidebar. */
+  container-type: inline-size;
+  container-name: nzvp;
 }
 
 /* ── Header ─────────────────────────────────────────────────────────────── */
@@ -87,6 +91,14 @@
   gap: 12px;
 }
 
+/* Stack cards when the panel itself is narrow (e.g. inside a sidebar). */
+@container nzvp (max-width: 400px) {
+  .nzvp-cards {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Fallback for browsers without container query support. */
 @media (max-width: 460px) {
   .nzvp-cards {
     grid-template-columns: 1fr;

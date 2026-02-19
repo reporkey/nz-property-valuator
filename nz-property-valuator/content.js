@@ -213,21 +213,25 @@
     const host = document.getElementById('nz-valuator-host');
     if (!host) return;
 
+    // Only use highly specific anchors — broad class selectors like
+    // [class*="property-header"] falsely match sidebar widgets on some listings.
     const anchors = [
       'tm-property-homes-estimate',
-      '[data-testid*="homes"]',
+      '[data-testid*="homes-estimate"]',
       '[class*="homes-estimate"]',
       '[class*="HomesEstimate"]',
-      '[class*="listing-header"]',
-      '[class*="property-header"]',
     ];
     for (const sel of anchors) {
       const el = document.querySelector(sel);
       if (el) { el.insertAdjacentElement('afterend', host); return; }
     }
-    const h1 = document.querySelector('h1');
+
+    // For the h1 fallback, prefer a heading inside the main content area
+    // so we don't accidentally land in the agent sidebar.
+    const mainEl = document.querySelector('main, article, [role="main"]');
+    const h1     = mainEl ? mainEl.querySelector('h1') : document.querySelector('h1');
     if (h1) h1.insertAdjacentElement('afterend', host);
-    // else leave at body top — already in place
+    // else leave at body.prepend position
   }
 
   // ─── Panel state helpers ──────────────────────────────────────────────────
