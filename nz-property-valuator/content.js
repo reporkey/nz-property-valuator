@@ -19,6 +19,9 @@
   const TIMEOUT_MS  = 10_000;   // give up after 10 s
   const INTERVAL_MS = 300;      // poll every 300 ms
 
+  // Sources displayed in the panel (homes.co.nz excluded by design).
+  const SOURCES = ['OneRoof', 'PropertyValue'];
+
   // ─── Strategy 1: JSON-LD ───────────────────────────────────────────────────
   // TradeMe injects a <script type="application/ld+json"> with:
   //   @type: "RealEstateListing"
@@ -165,8 +168,161 @@
     return address;
   }
 
-  // ─── Send address to background and log results ──────────────────────────
-  function requestValuations(address) {
+  // ─── Panel ────────────────────────────────────────────────────────────────
+
+  function buildPanelHTML() {
+    const cssUrl = chrome.runtime.getURL('panel.css');
+    const cards  = SOURCES.map(name => `
+      <div class="nzvp-card" id="nzvp-card-${name}">
+        <div class="nzvp-source-name">${name}</div>
+        <div class="nzvp-estimate"><span class="nzvp-spinner"></span></div>
+        <a class="nzvp-link" href="#" target="_blank" rel="noopener noreferrer" hidden>
+          View on ${name} →
+        </a>
+      </div>`).join('');
+
+    return `
+      <link rel="stylesheet" href="${cssUrl}">
+      <div class="nzvp-panel">
+        <header class="nzvp-header" id="nzvp-header">
+          <span class="nzvp-title">🏠 Property Valuations</span>
+          <button class="nzvp-toggle" aria-expanded="true" aria-label="Toggle panel">▾</button>
+        </header>
+        <div class="nzvp-body" id="nzvp-body">
+          <div class="nzvp-cards">${cards}</div>
+        </div>
+        <footer class="nzvp-footer">Powered by NZ Property Valuator</footer>
+      </div>`;
+  }
+
+  // Returns the shadow root (creating the host element and inserting it into
+  // the page if it doesn't already exist).
+  function injectPanel() {
+    const existing = document.getElementById('nz-valuator-host');
+    if (existing) return existing.shadowRoot;
+
+    const host   = document.createElement('div');
+    host.id      = 'nz-valuator-host';
+    const shadow = host.attachShadow({ mode: 'open' });
+    shadow.innerHTML = buildPanelHTML();
+
+    // ── Collapse / expand toggle ────────────────────────────────────────────
+    const header = shadow.getElementById('nzvp-header');
+    const toggle = shadow.querySelector('.nzvp-toggle');
+    const body   = shadow.getElementById('nzvp-body');
+    header.addEventListener('click', () => {
+      const collapsed = body.classList.toggle('nzvp-hidden');
+      toggle.classList.toggle('nzvp-collapsed', collapsed);
+      toggle.setAttribute('aria-expanded', String(!collapsed));
+    });
+
+    // ── Find insertion point ────────────────────────────────────────────────
+    // Prefer known TradeMe structural elements; fall back to h1 or page top.
+    const anchorSelectors = [
+      'tm-property-homes-estimate',       // HomesEstimate Angular component
+      '[data-testid*="homes"]',
+      '[class*="homes-estimate"]',
+      '[class*="HomesEstimate"]',
+      '[class*="listing-header"]',
+      '[class*="property-header"]',
+    ];
+
+    let inserted = false;
+    for (const sel of anchorSelectors) {
+      const el = document.querySelector(sel);
+      if (el) {
+        el.insertAdjacentElement('afterend', host);
+        inserted = true;
+        break;
+      }
+    }
+
+    if (!inserted) {
+      const h1 = document.querySelector('h1');
+      if (h1) {
+        h1.insertAdjacentElement('afterend', host);
+      } else {
+        const main = document.querySelector('main') || document.body;
+        main.insertAdjacentElement('afterbegin', host);
+      }
+    }
+
+    return shadow;
+  }
+
+  // ─── Card state updater ───────────────────────────────────────────────────
+
+  // Sets one card to LOADING (result = null), SUCCESS, NOT_FOUND, or ERROR.
+  function setCardState(shadow, sourceName, result) {
+    const card = shadow.getElementById(`nzvp-card-${sourceName}`);
+    if (!card) return;
+
+    const estimateEl = card.querySelector('.nzvp-estimate');
+    const linkEl     = card.querySelector('.nzvp-link');
+    card.querySelector('.nzvp-retry')?.remove();
+
+    if (!result) {
+      // LOADING
+      estimateEl.className = 'nzvp-estimate';
+      estimateEl.innerHTML  = '<span class="nzvp-spinner"></span>';
+      linkEl.hidden = true;
+      return;
+    }
+
+    if (result.estimate) {
+      // SUCCESS
+      estimateEl.className  = 'nzvp-estimate nzvp-success';
+      estimateEl.textContent = result.estimate;
+      if (result.url) {
+        linkEl.href   = result.url;
+        linkEl.hidden = false;
+      }
+    } else if (!result.error || /not found|not available/i.test(result.error)) {
+      // NOT_FOUND
+      estimateEl.className  = 'nzvp-estimate nzvp-not-found';
+      estimateEl.textContent = 'No estimate';
+      linkEl.hidden = true;
+    } else {
+      // ERROR
+      estimateEl.className  = 'nzvp-estimate nzvp-error-state';
+      estimateEl.textContent = 'Failed to load';
+      linkEl.hidden = true;
+    }
+  }
+
+  // Applies a full results array to all cards, then attaches retry buttons
+  // to any card that ended up in the ERROR state.
+  function applyResults(shadow, results, address) {
+    // Remove stale retry buttons before re-evaluating states.
+    shadow.querySelectorAll('.nzvp-retry').forEach(btn => btn.remove());
+
+    for (const result of results) {
+      if (SOURCES.includes(result.source)) {
+        setCardState(shadow, result.source, result);
+      }
+    }
+
+    // Attach retry buttons to error cards.
+    for (const sourceName of SOURCES) {
+      const card = shadow.getElementById(`nzvp-card-${sourceName}`);
+      if (!card) continue;
+      const estimateEl = card.querySelector('.nzvp-estimate');
+      if (!estimateEl.classList.contains('nzvp-error-state')) continue;
+
+      const retryBtn = document.createElement('button');
+      retryBtn.className   = 'nzvp-retry';
+      retryBtn.textContent = 'Retry';
+      retryBtn.addEventListener('click', () => {
+        setCardState(shadow, sourceName, null); // show spinner on this card
+        requestValuations(address, shadow);
+      });
+      card.appendChild(retryBtn);
+    }
+  }
+
+  // ─── Background messaging ─────────────────────────────────────────────────
+
+  function requestValuations(address, shadow) {
     chrome.runtime.sendMessage(
       { type: 'FETCH_VALUATIONS', address },
       response => {
@@ -180,6 +336,7 @@
         }
         const tag = response.fromCache ? '(cached)' : '(live)';
         console.log(LOG, `Valuations received ${tag}:`, response.results);
+        if (shadow) applyResults(shadow, response.results, address);
       }
     );
   }
@@ -192,7 +349,8 @@
   function poll() {
     const address = tryExtract();
     if (address) {
-      requestValuations(address);
+      const shadow = injectPanel();   // show panel with spinners immediately
+      requestValuations(address, shadow);
       return;
     }
 

@@ -13,11 +13,17 @@
     "https://www.propertyvalue.co.nz/*"
   ],
 
+  "web_accessible_resources": [
+    {
+      "resources": ["panel.css"],
+      "matches": ["https://www.trademe.co.nz/*"]
+    }
+  ],
+
   "content_scripts": [
     {
       "matches": ["https://www.trademe.co.nz/a/*"],
       "js": ["content.js"],
-      "css": ["panel.css"],
       "run_at": "document_idle"
     }
   ],
