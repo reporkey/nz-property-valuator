@@ -165,14 +165,36 @@
     return address;
   }
 
+  // ─── Send address to background and log results ──────────────────────────
+  function requestValuations(address) {
+    chrome.runtime.sendMessage(
+      { type: 'FETCH_VALUATIONS', address },
+      response => {
+        if (chrome.runtime.lastError) {
+          console.log(LOG, 'Messaging error:', chrome.runtime.lastError.message);
+          return;
+        }
+        if (!response?.ok) {
+          console.log(LOG, 'Background returned an error response:', response);
+          return;
+        }
+        const tag = response.fromCache ? '(cached)' : '(live)';
+        console.log(LOG, `Valuations received ${tag}:`, response.results);
+      }
+    );
+  }
+
   // ─── Main — poll until Angular has rendered ───────────────────────────────
   // TradeMe bootstraps Angular asynchronously; the JSON-LD script and DOM
   // content are inserted well after document_idle fires.
   const startTime = Date.now();
 
   function poll() {
-    const result = tryExtract();
-    if (result) return;   // done
+    const address = tryExtract();
+    if (address) {
+      requestValuations(address);
+      return;
+    }
 
     if (Date.now() - startTime >= TIMEOUT_MS) {
       console.log(LOG, 'Address extraction timed out — Angular may not have rendered yet');
