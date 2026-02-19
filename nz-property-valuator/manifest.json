@@ -1,0 +1,44 @@
+{
+  "manifest_version": 3,
+  "name": "NZ Property Valuator",
+  "version": "0.1.0",
+  "description": "Overlay property valuation data on NZ real estate listing pages.",
+
+  "permissions": ["activeTab"],
+
+  "host_permissions": [
+    "https://www.trademe.co.nz/*",
+    "https://www.oneroof.co.nz/*",
+    "https://www.homes.co.nz/*",
+    "https://www.propertyvalue.co.nz/*"
+  ],
+
+  "content_scripts": [
+    {
+      "matches": ["https://www.trademe.co.nz/a/*"],
+      "js": ["content.js"],
+      "css": ["panel.css"],
+      "run_at": "document_idle"
+    }
+  ],
+
+  "background": {
+    "service_worker": "background.js"
+  },
+
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "NZ Property Valuator",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

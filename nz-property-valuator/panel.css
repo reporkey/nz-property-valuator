@@ -1,0 +1,31 @@
+/**
+ * panel.css — Styles for the injected valuation panel
+ *
+ * Injected alongside content.js on TradeMe property listing pages.
+ * All selectors are namespaced under .nzpv- to avoid collisions with
+ * the host page's styles.
+ */
+
+/* ── Panel container ──────────────────────────────────────────────── */
+.nzpv-panel {
+  /* TODO: position, size, z-index, shadow */
+}
+
+/* ── Header ───────────────────────────────────────────────────────── */
+.nzpv-panel__header {
+  /* TODO: branding, close button */
+}
+
+/* ── Valuation row ────────────────────────────────────────────────── */
+.nzpv-valuation {
+  /* TODO: estimate display, source label */
+}
+
+/* ── Loading / error states ───────────────────────────────────────── */
+.nzpv-panel--loading {
+  /* TODO */
+}
+
+.nzpv-panel--error {
+  /* TODO */
+}
