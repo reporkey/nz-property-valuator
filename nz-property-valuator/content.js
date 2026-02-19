@@ -113,12 +113,34 @@
     return { streetAddress, suburb, city, fullAddress: parts.join(', ') };
   }
 
+  // TradeMe's JSON-LD uses addressLocality for the *district* (e.g. "Waitakere City"),
+  // not the actual suburb (e.g. "Sunnyvale").  The real suburb is always in the URL:
+  //   /a/property/{type}/{status}/{region}/{district}/{suburb}/listing/{id}
+  // Extracting it from the slug is more reliable than any DOM heuristic.
+  function suburbFromUrl() {
+    const parts      = location.pathname.split('/');
+    const listingIdx = parts.indexOf('listing');
+    if (listingIdx < 2) return null;
+    const slug = parts[listingIdx - 1];
+    if (!slug) return null;
+    // "waitakere-city" → "Waitakere City", "st-heliers" → "St Heliers"
+    return slug.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+  }
+
   function tryExtract() {
     let raw = extractFromJsonLd();
     let source = raw ? 'JSON-LD' : null;
     if (!raw) { raw = extractFromNextData(); source = raw ? '__NEXT_DATA__' : null; }
     if (!raw) { raw = extractFromDom();      source = raw ? 'DOM' : null; }
     if (!raw) return null;
+
+    // Override suburb with the URL slug — it's always the true suburb on TradeMe.
+    const urlSuburb = suburbFromUrl();
+    if (urlSuburb && urlSuburb !== raw.suburb) {
+      console.log(LOG, `Suburb corrected from URL: "${raw.suburb}" → "${urlSuburb}"`);
+      raw = { ...raw, suburb: urlSuburb };
+    }
+
     const address = normalize(raw);
     console.log(LOG, `Address extracted via ${source}:`, address);
     return address;
