@@ -314,8 +314,6 @@ async function fetchHomes(address) {
 
   const norm       = s => s.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
   const normStreet = norm(address.streetAddress);
-  const normSuburb = norm(address.suburb);
-  const normCity   = norm(address.city);
 
   async function homesSearch(query) {
     const resp = await fetchWithBackoff(
@@ -326,30 +324,29 @@ async function fetchHomes(address) {
     return (await resp.json()).Results ?? [];
   }
 
-  function findExact(results, requireLocality) {
-    return results.find(r => {
-      const n = norm(r.Title ?? '');
-      if (!n.startsWith(normStreet)) return false;
-      if (!requireLocality) return true;
-      return (normSuburb && n.includes(normSuburb)) || (normCity && n.includes(normCity));
-    }) ?? null;
+  // Result title must start with the searched street address.
+  // Unit-prefixed addresses ("2L/6 Burgoyne St" → "2l6 burgoyne st") don't match.
+  function findExact(results) {
+    return results.find(r => norm(r.Title ?? '').startsWith(normStreet)) ?? null;
   }
 
   // Build deduplicated query list.
+  // Query 3 (street-only) intentionally has no locality check: the TradeMe
+  // city field is the region name (e.g. "Manawatu / Whanganui"), which homes
+  // doesn't use — it stores properties under the actual city ("Palmerston North").
+  // The house-number + street-name combination is specific enough in NZ to
+  // avoid cross-city false positives at this fallback stage.
   const streetCity = [address.streetAddress, address.city].filter(Boolean).join(', ');
-  const queryList  = [
-    { q: address.fullAddress,   requireLocality: false },
-    { q: streetCity,            requireLocality: false },
-    { q: address.streetAddress, requireLocality: true  },
-  ].filter(({ q }, i, arr) => q && arr.findIndex(a => a.q === q) === i);
+  const queryList = [address.fullAddress, streetCity, address.streetAddress]
+    .filter((q, i, arr) => q && arr.indexOf(q) === i); // dedup
 
   let lastError = 'Address not found on homes.co.nz';
 
-  for (const { q, requireLocality } of queryList) {
+  for (const q of queryList) {
     // ── Search ──────────────────────────────────────────────────────────────
     let exact;
     try {
-      exact = findExact(await homesSearch(q), requireLocality);
+      exact = findExact(await homesSearch(q));
     } catch (err) {
       return {
         source:     'homes.co.nz',
