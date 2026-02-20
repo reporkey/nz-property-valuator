@@ -289,18 +289,33 @@ const HG_HEADERS  = {
 };
 
 async function fetchHomes(address) {
-  // ── Step 1: Resolve address to PropertyID ─────────────────────────────────
+  // ── Step 1 + 2: Progressive search → card, stop at first estimate ──────────
+  //
   // Unit-prefixed NZ addresses like "2L/6 Burgoyne St" normalise to
   // "2l6 burgoyne st" (slash stripped), which won't start with "6 burgoyne st",
-  // so unit results are correctly excluded.  However, homes.co.nz sometimes
-  // ranks unit results above the building entry for the full-address query, so
-  // a building like "6 Burgoyne Street" may not appear in the first response.
-  // In that case we retry with just the street address (no suburb/city) and
-  // additionally verify the suburb to avoid matching a different locality.
+  // so unit results are excluded.
+  //
+  // We try three progressively shorter queries, fetching the card for each
+  // matching PropertyID.  We return as soon as a card yields an estimate.
+  // This handles two problem cases:
+  //
+  //  a) Apartment blocks — the building-level record ("6 Burgoyne St") doesn't
+  //     appear in the full-address search but surfaces in a street-only query.
+  //  b) Suburb-name mismatches — TradeMe's "Terrace End" differs from homes'
+  //     "Palmerston North", so the full-address query finds a record with no
+  //     estimate while the street+city query finds the city-level record that
+  //     does have one.
+  //
+  // Query order:
+  //   1. fullAddress        — fastest for standard houses; no locality check.
+  //   2. streetAddress+city — skips suburb; fixes mismatch; no locality check.
+  //   3. streetAddress only — widest net; locality check (suburb OR city in
+  //                           title) to avoid cross-city false positives.
 
   const norm       = s => s.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
   const normStreet = norm(address.streetAddress);
   const normSuburb = norm(address.suburb);
+  const normCity   = norm(address.city);
 
   async function homesSearch(query) {
     const resp = await fetchWithBackoff(
@@ -311,80 +326,80 @@ async function fetchHomes(address) {
     return (await resp.json()).Results ?? [];
   }
 
-  let exact;
-  try {
-    // First try: full address query.
-    const results = await homesSearch(address.fullAddress);
-    exact = results.find(r => norm(r.Title ?? '').startsWith(normStreet));
+  function findExact(results, requireLocality) {
+    return results.find(r => {
+      const n = norm(r.Title ?? '');
+      if (!n.startsWith(normStreet)) return false;
+      if (!requireLocality) return true;
+      return (normSuburb && n.includes(normSuburb)) || (normCity && n.includes(normCity));
+    }) ?? null;
+  }
 
-    // Second try: street address only, with suburb check to avoid cross-suburb
-    // false positives (e.g. another "6 Burgoyne St" in a different city).
-    if (!exact) {
-      const results2 = await homesSearch(address.streetAddress);
-      exact = results2.find(r => {
-        const n = norm(r.Title ?? '');
-        return n.startsWith(normStreet) && (!normSuburb || n.includes(normSuburb));
-      });
+  // Build deduplicated query list.
+  const streetCity = [address.streetAddress, address.city].filter(Boolean).join(', ');
+  const queryList  = [
+    { q: address.fullAddress,   requireLocality: false },
+    { q: streetCity,            requireLocality: false },
+    { q: address.streetAddress, requireLocality: true  },
+  ].filter(({ q }, i, arr) => q && arr.findIndex(a => a.q === q) === i);
+
+  let lastError = 'Address not found on homes.co.nz';
+
+  for (const { q, requireLocality } of queryList) {
+    // ── Search ──────────────────────────────────────────────────────────────
+    let exact;
+    try {
+      exact = findExact(await homesSearch(q), requireLocality);
+    } catch (err) {
+      return {
+        source:     'homes.co.nz',
+        estimate:   null,
+        url:        null,
+        confidence: null,
+        error:      /homes\.co\.nz/.test(err.message) ? err.message : 'homes.co.nz request failed',
+      };
     }
-  } catch (err) {
+    if (!exact) continue;
+
+    // ── Card ─────────────────────────────────────────────────────────────
+    let cardData;
+    try {
+      const resp = await fetchWithBackoff(
+        `${HG_BASE_URL}/properties?property_ids=${exact.PropertyID}`,
+        { headers: HG_HEADERS },
+      );
+      if (!resp.ok) throw new Error(`homes.co.nz card failed (HTTP ${resp.status})`);
+      cardData = await resp.json();
+    } catch (err) {
+      return {
+        source:     'homes.co.nz',
+        estimate:   null,
+        url:        null,
+        confidence: null,
+        error:      /homes\.co\.nz/.test(err.message) ? err.message : 'homes.co.nz request failed',
+      };
+    }
+
+    const card = (cardData.cards ?? [])[0];
+    if (!card) { lastError = 'No estimate available on homes.co.nz'; continue; }
+
+    const pd      = card.property_details ?? {};
+    const lo      = pd.display_estimated_lower_value_short;
+    const hi      = pd.display_estimated_upper_value_short;
+    const pageUrl = card.url ? 'https://homes.co.nz/address' + card.url : null;
+
+    if (!lo || !hi) { lastError = 'No estimate available on homes.co.nz'; continue; }
+
     return {
       source:     'homes.co.nz',
-      estimate:   null,
-      url:        null,
-      confidence: null,
-      error:      /homes\.co\.nz/.test(err.message) ? err.message : 'homes.co.nz request failed',
+      estimate:   `$${lo} \u2013 $${hi}`,   // e.g. "$920K – $1.04M"
+      url:        pageUrl,
+      confidence: 'high',
+      error:      null,
     };
   }
 
-  if (!exact) {
-    return { source: 'homes.co.nz', estimate: null, url: null, confidence: null,
-             error: 'Address not found on homes.co.nz' };
-  }
-
-  const confidence = 'high';
-  const propertyId = exact.PropertyID;
-
-  // ── Step 2: Fetch estimate card ───────────────────────────────────────────
-  const cardUrl = `${HG_BASE_URL}/properties?property_ids=${propertyId}`;
-
-  let cardData;
-  try {
-    const resp = await fetchWithBackoff(cardUrl, { headers: HG_HEADERS });
-    if (!resp.ok) throw new Error(`homes.co.nz card failed (HTTP ${resp.status})`);
-    cardData = await resp.json();
-  } catch (err) {
-    return {
-      source:     'homes.co.nz',
-      estimate:   null,
-      url:        null,
-      confidence,
-      error:      /homes\.co\.nz/.test(err.message) ? err.message : 'homes.co.nz request failed',
-    };
-  }
-
-  const card = (cardData.cards ?? [])[0];
-  if (!card) {
-    return { source: 'homes.co.nz', estimate: null, url: null, confidence,
-             error: 'No estimate available on homes.co.nz' };
-  }
-
-  const pd      = card.property_details ?? {};
-  const lo      = pd.display_estimated_lower_value_short;
-  const hi      = pd.display_estimated_upper_value_short;
-  const pageUrl = card.url ? 'https://homes.co.nz/address' + card.url : null;
-
-  if (!lo || !hi) {
-    return { source: 'homes.co.nz', estimate: null, url: pageUrl, confidence,
-             error: 'No estimate available on homes.co.nz' };
-  }
-
-  return {
-    source:     'homes.co.nz',
-    estimate:   `$${lo} \u2013 $${hi}`,   // e.g. "$920K – $1.04M"
-    url:        pageUrl,
-    confidence,
-    error:      null,
-  };
+  return { source: 'homes.co.nz', estimate: null, url: null, confidence: null, error: lastError };
 }
 
 // ─── PropertyValue fetcher ───────────────────────────────────────────────
@@ -521,33 +536,49 @@ const RE_HEADERS  = {
 
 async function fetchRealEstate(address) {
   // ── Step 1: Smart search → listing ID ─────────────────────────────────────
-  const smartUrl = `${RE_API_BASE}/search/v1/listings/smart` +
-    `?q=${encodeURIComponent(address.fullAddress)}&filter[category][0]=res_sale`;
+  // Try fullAddress first; if no listings found, retry with streetAddress only.
+  // The suburb from TradeMe (e.g. "Terrace End") may not match RealEstate's
+  // indexing, so the shorter query surfaces listings that the full query misses.
+
+  const norm       = s => s.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+  const normStreet = norm(address.streetAddress);
+
+  async function reSmartSearch(q) {
+    const resp = await fetchWithBackoff(
+      `${RE_API_BASE}/search/v1/listings/smart?q=${encodeURIComponent(q)}&filter[category][0]=res_sale`,
+      { headers: RE_HEADERS },
+    );
+    if (!resp.ok) throw new Error(`search failed (HTTP ${resp.status})`);
+    const hits = await resp.json();
+    return (Array.isArray(hits) ? hits : (hits.data ?? [])).filter(r => r['listing-id']);
+  }
+
+  function pickBest(listings) {
+    const exact = listings.find(r => norm(r['street-address'] ?? '').startsWith(normStreet));
+    return exact ?? listings[0] ?? null;
+  }
+
+  const firstStreetWord = addr => { const m = /^\d+[a-z]?\s+(\w+)/i.exec(norm(addr)); return m ? m[1] : ''; };
+  const queryWord = firstStreetWord(address.streetAddress);
 
   let listingId;
   try {
-    const resp = await fetchWithBackoff(smartUrl, { headers: RE_HEADERS });
-    if (!resp.ok) throw new Error(`search failed (HTTP ${resp.status})`);
-    const hits = await resp.json();
+    // First try: full address.
+    let listings = await reSmartSearch(address.fullAddress);
 
-    // Smart search returns a flat array mixing listing and suburb results.
-    // Listings have a 'listing-id' field; prefer exact street-address match.
-    const norm       = s => s.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
-    const normStreet = norm(address.streetAddress);
-    const all        = Array.isArray(hits) ? hits : (hits.data ?? []);
-    const listings   = all.filter(r => r['listing-id']);
-    const exact      = listings.find(r => norm(r['street-address'] ?? '').startsWith(normStreet));
-    const best       = exact ?? listings[0];
+    // Retry with street address only if no listings found.
+    if (listings.length === 0 && address.streetAddress !== address.fullAddress) {
+      listings = await reSmartSearch(address.streetAddress);
+    }
 
+    const best = pickBest(listings);
     if (!best) {
       return { source: 'RealEstate.co.nz', estimate: null, url: null, confidence: null,
                error: 'Address not found on RealEstate.co.nz' };
     }
 
     // Street-name guard: reject results for a completely different street.
-    const firstStreetWord = addr => { const m = /^\d+[a-z]?\s+(\w+)/i.exec(norm(addr)); return m ? m[1] : ''; };
     const resultWord = firstStreetWord(best['street-address'] ?? '');
-    const queryWord  = firstStreetWord(address.streetAddress);
     if (resultWord && queryWord && resultWord !== queryWord) {
       return { source: 'RealEstate.co.nz', estimate: null, url: null, confidence: null,
                error: 'Address not found on RealEstate.co.nz' };
