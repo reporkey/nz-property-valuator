@@ -12,7 +12,9 @@
     "https://www.homes.co.nz/*",
     "https://homes.co.nz/*",
     "https://gateway.homes.co.nz/*",
-    "https://www.propertyvalue.co.nz/*"
+    "https://www.propertyvalue.co.nz/*",
+    "https://www.realestate.co.nz/*",
+    "https://realestate.co.nz/*"
   ],
 
   "web_accessible_resources": [

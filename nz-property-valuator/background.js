@@ -34,12 +34,13 @@ function setCached(fullAddress, results) {
 // Source keys must match the `source` field returned by each fetcher.
 // Defaults are read from chrome.storage.sync; used as fallback if unavailable.
 
-const DISPLAYED_SOURCES = ['OneRoof', 'homes.co.nz', 'PropertyValue'];
+const DISPLAYED_SOURCES = ['OneRoof', 'homes.co.nz', 'PropertyValue', 'RealEstate.co.nz'];
 
 const DEFAULT_SOURCE_SETTINGS = {
-  OneRoof:       { enabled: true },
-  'homes.co.nz': { enabled: true },
-  PropertyValue: { enabled: true },
+  OneRoof:            { enabled: true },
+  'homes.co.nz':      { enabled: true },
+  PropertyValue:      { enabled: true },
+  'RealEstate.co.nz': { enabled: true },
 };
 
 function disabledResult(source) {
@@ -458,6 +459,20 @@ async function fetchPropertyValue(address) {
   };
 }
 
+// ─── RealEstate.co.nz fetcher (STUB) ─────────────────────────────────────
+// TODO: replace with real logic after site research.
+
+async function fetchRealEstate(address) {
+  await new Promise(r => setTimeout(r, 1_000));
+  return {
+    source:     'RealEstate.co.nz',
+    estimate:   '$860K',
+    url:        'https://www.realestate.co.nz/',
+    confidence: 'medium',
+    error:      null,
+  };
+}
+
 // ─── Message listener ────────────────────────────────────────────────────
 // Handles two message types:
 //   FETCH_VALUATIONS — run enabled fetchers, stream partial results, cache.
@@ -467,9 +482,10 @@ function runFetchers(address, sources, tabId, sendResponse) {
   const enabled = name => sources[name]?.enabled !== false;
 
   const fetches = [
-    enabled('OneRoof')       ? fetchOneRoof(address)      : Promise.resolve(disabledResult('OneRoof')),
-    enabled('homes.co.nz')   ? fetchHomes(address)        : Promise.resolve(disabledResult('homes.co.nz')),
-    enabled('PropertyValue') ? fetchPropertyValue(address) : Promise.resolve(disabledResult('PropertyValue')),
+    enabled('OneRoof')            ? fetchOneRoof(address)       : Promise.resolve(disabledResult('OneRoof')),
+    enabled('homes.co.nz')        ? fetchHomes(address)         : Promise.resolve(disabledResult('homes.co.nz')),
+    enabled('PropertyValue')      ? fetchPropertyValue(address)  : Promise.resolve(disabledResult('PropertyValue')),
+    enabled('RealEstate.co.nz')   ? fetchRealEstate(address)    : Promise.resolve(disabledResult('RealEstate.co.nz')),
   ];
 
   // Stream each result to the tab as soon as it settles so the panel can

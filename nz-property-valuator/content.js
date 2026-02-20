@@ -20,7 +20,7 @@
   const INTERVAL_MS = 300;      // poll every 300 ms
 
   // Sources shown in the panel (fetched via background.js).
-  const SOURCES = ['OneRoof', 'homes.co.nz', 'PropertyValue'];
+  const SOURCES = ['OneRoof', 'homes.co.nz', 'PropertyValue', 'RealEstate.co.nz'];
 
   // ─── Module state ─────────────────────────────────────────────────────────
   let currentShadow = null;   // shadow root of the active panel
