@@ -321,7 +321,7 @@
       estimateEl.className  = 'nzvp-estimate nzvp-success';
       estimateEl.textContent = result.estimate;
       if (result.url) { linkEl.href = result.url; linkEl.hidden = false; }
-    } else if (!result.error || /not found|not available/i.test(result.error)) {
+    } else if (!result.error || /not found|not available|no estimate/i.test(result.error)) {
       estimateEl.className  = 'nzvp-estimate nzvp-not-found';
       estimateEl.textContent = 'No estimate';
       linkEl.hidden = true;

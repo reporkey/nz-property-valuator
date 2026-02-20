@@ -32,7 +32,7 @@ function formatStatus(entry) {
   if (entry.ok) {
     return { text: `✓ ${entry.estimate} · ${ago}`, cls: 'ok' };
   }
-  if (!entry.error || /not found|not available/i.test(entry.error)) {
+  if (!entry.error || /not found|not available|no estimate/i.test(entry.error)) {
     return { text: `No estimate · ${ago}`, cls: 'none' };
   }
   return { text: `✗ Failed · ${ago}`, cls: 'fail' };
