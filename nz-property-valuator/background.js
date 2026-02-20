@@ -252,7 +252,7 @@ async function fetchOneRoof(address) {
   const avm = parseOrAvm(html);
   if (!avm) {
     return { source: 'OneRoof', estimate: null, url: pageUrl, confidence,
-             error: 'OneRoof returned unexpected format' };
+             error: 'No estimate available on OneRoof' };
   }
   if (!avm.showAvm || !avm.estimate) {
     return { source: 'OneRoof', estimate: null, url: pageUrl, confidence,
@@ -365,7 +365,7 @@ async function fetchHomes(address) {
   const card = (cardData.cards ?? [])[0];
   if (!card) {
     return { source: 'homes.co.nz', estimate: null, url: null, confidence,
-             error: 'homes.co.nz returned no property data' };
+             error: 'No estimate available on homes.co.nz' };
   }
 
   const pd      = card.property_details ?? {};
@@ -479,7 +479,7 @@ async function fetchPropertyValue(address) {
   if (!range || range.lowerBand == null || range.upperBand == null) {
     return { source: 'PropertyValue', estimate: null,
              url: pvPath ? PV_BASE_URL + pvPath : null, confidence: null,
-             error: 'PropertyValue returned unexpected format' };
+             error: 'No estimate available on PropertyValue' };
   }
 
   const confidenceMap = { HIGH: 'high', MEDIUM: 'medium', LOW: 'low' };
