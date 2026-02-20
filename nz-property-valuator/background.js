@@ -297,11 +297,15 @@ async function fetchHomes(address) {
              error: 'Address not found on homes.co.nz' };
   }
 
-  const propertyId = results[0].PropertyID;
-
+  // Prefer the result whose title starts with the exact searched street address.
+  // Avoids picking "48a Adams Rd" when searching for "48 Adams Rd" (results[0]
+  // is sorted by relevance/alpha, not by exactness of house-number match).
   const norm       = s => s.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
-  const confidence = norm(results[0].Title ?? '').startsWith(norm(address.streetAddress))
-    ? 'high' : 'medium';
+  const normStreet = norm(address.streetAddress);
+  const exact      = results.find(r => norm(r.Title ?? '').startsWith(normStreet));
+  const best       = exact ?? results[0];
+  const confidence = exact ? 'high' : 'medium';
+  const propertyId = best.PropertyID;
 
   // ── Step 2: Fetch estimate card ───────────────────────────────────────────
   const cardUrl = `${HG_BASE_URL}/properties?property_ids=${propertyId}`;
