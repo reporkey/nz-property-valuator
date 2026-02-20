@@ -459,17 +459,144 @@ async function fetchPropertyValue(address) {
   };
 }
 
-// ─── RealEstate.co.nz fetcher (STUB) ─────────────────────────────────────
-// TODO: replace with real logic after site research.
+// ─── RealEstate.co.nz fetcher ────────────────────────────────────────────
+// Flow:
+//   1. GET platform.realestate.co.nz/search/v1/listings/smart?q=<fullAddress>
+//         &filter[category][0]=res_sale
+//      → flat array of results; find entry with listing-id matching address
+//   2. GET platform.realestate.co.nz/search/v1/listings/<listing-id>
+//      → JSONAPI: data.attributes['property-short-id']
+//   3. GET www.realestate.co.nz/property/<address-slug>/<property-short-id>
+//      → parse __NEXT_DATA__ → estimated-value.{value-low, value-high,
+//                                               confidence-rating}
+//
+// CORS: platform.realestate.co.nz requires Origin: https://www.realestate.co.nz.
+// The extension service worker can set this when it has host_permissions for
+// platform.realestate.co.nz (same approach as homes.co.nz / gateway).
+
+const RE_API_BASE = 'https://platform.realestate.co.nz';
+const RE_SITE     = 'https://www.realestate.co.nz';
+const RE_HEADERS  = {
+  'Accept':  'application/json',
+  'Origin':  RE_SITE,
+  'Referer': RE_SITE + '/',
+};
+
+function reSlugify(str) {
+  return str.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+
+function parseReAvm(html) {
+  const m = /<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/.exec(html);
+  if (!m) return null;
+  let data;
+  try { data = JSON.parse(m[1]); } catch { return null; }
+
+  // Recursively search for the estimated-value object.
+  function findEv(node, depth) {
+    if (!node || typeof node !== 'object' || depth > 12) return null;
+    if (node['estimated-value']?.['value-mid'] != null) return node['estimated-value'];
+    for (const v of Object.values(node)) {
+      const r = findEv(v, depth + 1);
+      if (r) return r;
+    }
+    return null;
+  }
+
+  const ev = findEv(data, 0);
+  if (!ev) return null;
+  return {
+    low:        ev['value-low'],
+    high:       ev['value-high'],
+    confidence: ev['confidence-rating'],
+  };
+}
 
 async function fetchRealEstate(address) {
-  await new Promise(r => setTimeout(r, 1_000));
+  // ── Step 1: Smart search → listing ID ─────────────────────────────────────
+  const smartUrl = `${RE_API_BASE}/search/v1/listings/smart` +
+    `?q=${encodeURIComponent(address.fullAddress)}&filter[category][0]=res_sale`;
+
+  let listingId, listingSlug;
+  try {
+    const resp = await fetchWithBackoff(smartUrl, { headers: RE_HEADERS });
+    if (!resp.ok) throw new Error(`search failed (HTTP ${resp.status})`);
+    const hits = await resp.json();
+
+    // Smart search returns a flat array mixing listing and suburb results.
+    // Listings have a 'listing-id' field; prefer exact street-address match.
+    const norm       = s => s.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+    const normStreet = norm(address.streetAddress);
+    const all        = Array.isArray(hits) ? hits : (hits.data ?? []);
+    const listings   = all.filter(r => r['listing-id']);
+    const exact      = listings.find(r => norm(r['street-address'] ?? '').startsWith(normStreet));
+    const best       = exact ?? listings[0];
+
+    if (!best) {
+      return { source: 'RealEstate.co.nz', estimate: null, url: null, confidence: null,
+               error: 'Address not found on RealEstate.co.nz' };
+    }
+    listingId   = best['listing-id'];
+    listingSlug = reSlugify(`${best['street-address'] ?? address.streetAddress} ${best['suburb'] ?? address.suburb}`);
+  } catch (err) {
+    return { source: 'RealEstate.co.nz', estimate: null, url: null, confidence: null,
+             error: 'RealEstate.co.nz request failed' };
+  }
+
+  const listingUrl = `${RE_SITE}/${listingId}/residential/sale/${listingSlug}`;
+
+  // ── Step 2: Listing detail → property short ID ────────────────────────────
+  let propertyShortId;
+  try {
+    const resp = await fetchWithTimeout(
+      `${RE_API_BASE}/search/v1/listings/${listingId}`,
+      { headers: RE_HEADERS },
+    );
+    if (resp.ok) {
+      const detail    = await resp.json();
+      // JSONAPI: { data: { attributes: { 'property-short-id': '...' } } }
+      propertyShortId = detail.data?.attributes?.['property-short-id']
+        ?? detail.data?.['property-short-id']
+        ?? detail['property-short-id'];
+    }
+  } catch { /* non-fatal — fall through without AVM */ }
+
+  if (!propertyShortId) {
+    return { source: 'RealEstate.co.nz', estimate: null, url: listingUrl, confidence: null,
+             error: 'No estimate available on RealEstate.co.nz' };
+  }
+
+  // ── Step 3: Property insights page → AVM ─────────────────────────────────
+  const addressSlug = reSlugify(`${address.streetAddress} ${address.suburb}`);
+  const insightsUrl = `${RE_SITE}/property/${addressSlug}/${propertyShortId}`;
+
+  let html;
+  try {
+    const resp = await fetchWithTimeout(insightsUrl, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible)' },
+    });
+    if (!resp.ok) throw new Error(`property page failed (HTTP ${resp.status})`);
+    html = await resp.text();
+  } catch {
+    return { source: 'RealEstate.co.nz', estimate: null, url: listingUrl, confidence: null,
+             error: 'No estimate available on RealEstate.co.nz' };
+  }
+
+  const avm = parseReAvm(html);
+  if (!avm || avm.low == null || avm.high == null) {
+    return { source: 'RealEstate.co.nz', estimate: null, url: insightsUrl, confidence: null,
+             error: 'No estimate available on RealEstate.co.nz' };
+  }
+
+  const confMap    = { 5: 'high', 4: 'high', 3: 'medium', 2: 'low', 1: 'low' };
+  const confidence = confMap[avm.confidence] ?? 'medium';
+
   return {
-    source:     'RealEstate.co.nz',
-    estimate:   '$860K',
-    url:        'https://www.realestate.co.nz/',
-    confidence: 'medium',
-    error:      null,
+    source:   'RealEstate.co.nz',
+    estimate: `${fmtAmount(avm.low)} \u2013 ${fmtAmount(avm.high)}`,
+    url:      insightsUrl,
+    confidence,
+    error:    null,
   };
 }
 
