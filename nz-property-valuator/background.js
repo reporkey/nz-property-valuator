@@ -290,14 +290,42 @@ const HG_HEADERS  = {
 
 async function fetchHomes(address) {
   // ── Step 1: Resolve address to PropertyID ─────────────────────────────────
-  const searchUrl = `${HG_BASE_URL}/address/search` +
-    `?Address=${encodeURIComponent(address.fullAddress)}`;
+  // Unit-prefixed NZ addresses like "2L/6 Burgoyne St" normalise to
+  // "2l6 burgoyne st" (slash stripped), which won't start with "6 burgoyne st",
+  // so unit results are correctly excluded.  However, homes.co.nz sometimes
+  // ranks unit results above the building entry for the full-address query, so
+  // a building like "6 Burgoyne Street" may not appear in the first response.
+  // In that case we retry with just the street address (no suburb/city) and
+  // additionally verify the suburb to avoid matching a different locality.
 
-  let searchData;
-  try {
-    const resp = await fetchWithBackoff(searchUrl, { headers: HG_HEADERS });
+  const norm       = s => s.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+  const normStreet = norm(address.streetAddress);
+  const normSuburb = norm(address.suburb);
+
+  async function homesSearch(query) {
+    const resp = await fetchWithBackoff(
+      `${HG_BASE_URL}/address/search?Address=${encodeURIComponent(query)}`,
+      { headers: HG_HEADERS },
+    );
     if (!resp.ok) throw new Error(`homes.co.nz search failed (HTTP ${resp.status})`);
-    searchData = await resp.json();
+    return (await resp.json()).Results ?? [];
+  }
+
+  let exact;
+  try {
+    // First try: full address query.
+    const results = await homesSearch(address.fullAddress);
+    exact = results.find(r => norm(r.Title ?? '').startsWith(normStreet));
+
+    // Second try: street address only, with suburb check to avoid cross-suburb
+    // false positives (e.g. another "6 Burgoyne St" in a different city).
+    if (!exact) {
+      const results2 = await homesSearch(address.streetAddress);
+      exact = results2.find(r => {
+        const n = norm(r.Title ?? '');
+        return n.startsWith(normStreet) && (!normSuburb || n.includes(normSuburb));
+      });
+    }
   } catch (err) {
     return {
       source:     'homes.co.nz',
@@ -308,21 +336,6 @@ async function fetchHomes(address) {
     };
   }
 
-  const results = searchData.Results ?? [];
-  if (results.length === 0) {
-    return { source: 'homes.co.nz', estimate: null, url: null, confidence: null,
-             error: 'Address not found on homes.co.nz' };
-  }
-
-  // Require an exact street-address match: result title must start with the
-  // searched street address.  Unit-prefixed NZ addresses like "2L/6 Burgoyne St"
-  // normalise to "2l6 burgoyne st" (slash stripped), which won't start with
-  // "6 burgoyne st", so apartment units are excluded when we searched by
-  // building address.  Falling back to results[0] would silently return a
-  // random unit, so we return "not found" instead.
-  const norm       = s => s.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
-  const normStreet = norm(address.streetAddress);
-  const exact      = results.find(r => norm(r.Title ?? '').startsWith(normStreet));
   if (!exact) {
     return { source: 'homes.co.nz', estimate: null, url: null, confidence: null,
              error: 'Address not found on homes.co.nz' };
