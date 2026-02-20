@@ -185,14 +185,28 @@ function parseOrAvm(html) {
 
 async function fetchOneRoof(address) {
   // ── Step 1: Resolve address to slug ───────────────────────────────────────
-  const searchUrl = `${OR_BASE_URL}/v2.6/address/search?isMix=1` +
-    `&key=${encodeURIComponent(address.fullAddress)}&typeId=-100`;
-
-  let searchData;
-  try {
-    const resp = await fetchWithBackoff(searchUrl, { headers: await orHeaders(searchUrl) });
+  async function orSearch(key) {
+    const url = `${OR_BASE_URL}/v2.6/address/search?isMix=1` +
+      `&key=${encodeURIComponent(key)}&typeId=-100`;
+    const resp = await fetchWithBackoff(url, { headers: await orHeaders(url) });
     if (!resp.ok) throw new Error(`OneRoof search request failed (HTTP ${resp.status})`);
-    searchData = await resp.json();
+    const data = await resp.json();
+    return data.properties ?? [];
+  }
+
+  // Build fallback query list: fullAddress → streetAddress + suburb (drops city) → streetAddress alone.
+  // The city name from TradeMe's addressRegion (e.g. "Christchurch City") can confuse OneRoof search;
+  // dropping it to street + suburb is often sufficient for an unambiguous match.
+  const streetSuburb = [address.streetAddress, address.suburb].filter(Boolean).join(', ');
+  const queryList = [address.fullAddress, streetSuburb, address.streetAddress]
+    .filter((q, i, arr) => q && arr.indexOf(q) === i); // dedup
+
+  let properties = [];
+  try {
+    for (const q of queryList) {
+      properties = await orSearch(q);
+      if (properties.length > 0) break;
+    }
   } catch (err) {
     return {
       source:     'OneRoof',
@@ -203,7 +217,6 @@ async function fetchOneRoof(address) {
     };
   }
 
-  const properties = searchData.properties ?? [];
   if (properties.length === 0) {
     return { source: 'OneRoof', estimate: null, url: null, confidence: null,
              error: 'Address not found on OneRoof' };
