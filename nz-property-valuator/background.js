@@ -314,27 +314,22 @@ async function fetchHomes(address) {
              error: 'Address not found on homes.co.nz' };
   }
 
-  // Prefer the result whose title starts with the exact searched street address.
-  // Avoids picking "48a Adams Rd" when searching for "48 Adams Rd" (results[0]
-  // is sorted by relevance/alpha, not by exactness of house-number match).
+  // Require an exact street-address match: result title must start with the
+  // searched street address.  Unit-prefixed NZ addresses like "2L/6 Burgoyne St"
+  // normalise to "2l6 burgoyne st" (slash stripped), which won't start with
+  // "6 burgoyne st", so apartment units are excluded when we searched by
+  // building address.  Falling back to results[0] would silently return a
+  // random unit, so we return "not found" instead.
   const norm       = s => s.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
   const normStreet = norm(address.streetAddress);
   const exact      = results.find(r => norm(r.Title ?? '').startsWith(normStreet));
-  const best       = exact ?? results[0];
-  const confidence = exact ? 'high' : 'medium';
-
-  // Street-name guard: reject results for a clearly different street.
-  // For unit-prefixed titles like "10C, 50 Eden Crescent" the regex won't match
-  // the leading token as a simple house number, so the guard is safely skipped.
-  const firstStreetWord = addr => { const m = /^\d+[a-z]?\s+(\w+)/i.exec(norm(addr)); return m ? m[1] : ''; };
-  const resultWord = firstStreetWord(best.Title ?? '');
-  const queryWord  = firstStreetWord(address.streetAddress);
-  if (resultWord && queryWord && resultWord !== queryWord) {
+  if (!exact) {
     return { source: 'homes.co.nz', estimate: null, url: null, confidence: null,
              error: 'Address not found on homes.co.nz' };
   }
 
-  const propertyId = best.PropertyID;
+  const confidence = 'high';
+  const propertyId = exact.PropertyID;
 
   // ── Step 2: Fetch estimate card ───────────────────────────────────────────
   const cardUrl = `${HG_BASE_URL}/properties?property_ids=${propertyId}`;
