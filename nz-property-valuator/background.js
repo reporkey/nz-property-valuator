@@ -185,6 +185,18 @@ function parseOrAvm(html) {
 
 async function fetchOneRoof(address) {
   // ── Step 1: Resolve address to slug ───────────────────────────────────────
+  const norm = s => s.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+  const normStreet = norm(address.streetAddress);
+
+  // Extract the first distinctive word of the street name (after the house number).
+  // Used to reject results from a completely different street.
+  // Example: "50 Edenvale Crescent" → "edenvale"; "50 Eden Crescent" → "eden".
+  const firstStreetWord = addr => {
+    const m = /^\d+[a-z]?\s+(\w+)/i.exec(norm(addr));
+    return m ? m[1] : '';
+  };
+  const queryWord = firstStreetWord(address.streetAddress);
+
   async function orSearch(key) {
     const url = `${OR_BASE_URL}/v2.6/address/search?isMix=1` +
       `&key=${encodeURIComponent(key)}&typeId=-100`;
@@ -194,18 +206,32 @@ async function fetchOneRoof(address) {
     return data.properties ?? [];
   }
 
-  // Build fallback query list: fullAddress → streetAddress + suburb (drops city) → streetAddress alone.
-  // The city name from TradeMe's addressRegion (e.g. "Christchurch City") can confuse OneRoof search;
-  // dropping it to street + suburb is often sufficient for an unambiguous match.
+  // Find the best matching property from a result set.
+  // Prefers an exact street-address prefix match; falls back to any result
+  // whose first street word matches the query word.
+  // Returns null if no result passes the street-name guard.
+  function findBest(properties) {
+    const exact = properties.find(p => norm(p.pureLabel ?? '').startsWith(normStreet));
+    if (exact) return exact;
+    return properties.find(p => {
+      const resultWord = firstStreetWord(p.pureLabel ?? '');
+      return !resultWord || !queryWord || resultWord === queryWord;
+    }) ?? null;
+  }
+
+  // Fallback query cascade: fullAddress → street + suburb (drops city) → street alone.
+  // The city/region from TradeMe (e.g. "Canterbury") can be picked up as a street-name
+  // keyword by the OneRoof search API, returning completely unrelated results.
+  // Continuing past such false-positive result sets lets us reach a cleaner query.
   const streetSuburb = [address.streetAddress, address.suburb].filter(Boolean).join(', ');
   const queryList = [address.fullAddress, streetSuburb, address.streetAddress]
     .filter((q, i, arr) => q && arr.indexOf(q) === i); // dedup
 
-  let properties = [];
+  let best = null;
   try {
     for (const q of queryList) {
-      properties = await orSearch(q);
-      if (properties.length > 0) break;
+      best = findBest(await orSearch(q));
+      if (best) break;
     }
   } catch (err) {
     return {
@@ -217,35 +243,14 @@ async function fetchOneRoof(address) {
     };
   }
 
-  if (properties.length === 0) {
+  if (!best) {
     return { source: 'OneRoof', estimate: null, url: null, confidence: null,
              error: 'Address not found on OneRoof' };
   }
 
-  const best    = properties[0];
-  const slug    = best.slug;   // "auckland/remuera/10-mahoe-avenue/qeHJ8"
-  const pageUrl = `${OR_BASE_URL}/property/${slug}`;
-
-  // Confidence: does the top result's label start with our street address?
-  const norm = s => s.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
-  const confidence = norm(best.pureLabel ?? '').startsWith(norm(address.streetAddress))
-    ? 'high' : 'medium';
-
-  // Street-name guard: reject results for a completely different street.
-  // Extracts the first word of the street name (after the leading house number)
-  // and compares it between the query and the API result.
-  // Example: "50 Edenvale Crescent" vs "50 Eden Crescent" → "edenvale" ≠ "eden" → reject.
-  // Only rejects when both sides parse successfully, so edge-cases fall through.
-  const firstStreetWord = addr => {
-    const m = /^\d+[a-z]?\s+(\w+)/i.exec(norm(addr));
-    return m ? m[1] : '';
-  };
-  const resultWord = firstStreetWord(best.pureLabel ?? '');
-  const queryWord  = firstStreetWord(address.streetAddress);
-  if (resultWord && queryWord && resultWord !== queryWord) {
-    return { source: 'OneRoof', estimate: null, url: null, confidence: null,
-             error: 'Address not found on OneRoof' };
-  }
+  const slug       = best.slug;   // "auckland/remuera/10-mahoe-avenue/qeHJ8"
+  const pageUrl    = `${OR_BASE_URL}/property/${slug}`;
+  const confidence = norm(best.pureLabel ?? '').startsWith(normStreet) ? 'high' : 'medium';
 
   // ── Step 2: Fetch property page and parse RSC AVM data ────────────────────
   let html;
