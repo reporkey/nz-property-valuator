@@ -586,13 +586,15 @@ async function fetchRealEstate(address) {
     const ev       = attrs['estimated-value'];
     const pageUrl  = attrs['website-full-url'] ?? null;
 
-    if (!ev || ev['value-low'] == null || ev['value-high'] == null) {
+    // confidence-rating 1 = minimum (API has essentially no confidence) → suppress.
+    // confidence-rating 2+ = show with appropriate label.
+    const confMap    = { 5: 'high', 4: 'high', 3: 'medium', 2: 'low' };
+    const confidence = confMap[ev['confidence-rating']] ?? null;
+
+    if (!ev || ev['value-low'] == null || ev['value-high'] == null || confidence === null) {
       return { source: 'RealEstate.co.nz', estimate: null, url: pageUrl, confidence: null,
                error: 'No estimate available on RealEstate.co.nz' };
     }
-
-    const confMap    = { 5: 'high', 4: 'high', 3: 'medium', 2: 'low', 1: 'low' };
-    const confidence = confMap[ev['confidence-rating']] ?? 'medium';
 
     return {
       source:   'RealEstate.co.nz',
