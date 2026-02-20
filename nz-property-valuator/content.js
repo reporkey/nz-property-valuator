@@ -109,8 +109,16 @@
   }
 
   function normalize({ streetAddress, suburb, city }) {
-    const parts = [streetAddress, suburb, city].filter(Boolean);
-    return { streetAddress, suburb, city, fullAddress: parts.join(', ') };
+    // TradeMe sometimes appends the suburb to the streetAddress field in JSON-LD,
+    // e.g. "865 Waikaretu Valley Road Tuakau" when suburb = "Tuakau".
+    // Strip it so it doesn't duplicate in fullAddress and corrupt search queries.
+    let street = streetAddress;
+    if (suburb) {
+      const esc = suburb.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      street = street.replace(new RegExp('\\s+' + esc + '\\s*$', 'i'), '').trim();
+    }
+    const parts = [street, suburb, city].filter(Boolean);
+    return { streetAddress: street, suburb, city, fullAddress: parts.join(', ') };
   }
 
   // TradeMe's JSON-LD uses addressLocality for the *district* (e.g. "Waitakere City"),
