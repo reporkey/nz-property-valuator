@@ -213,9 +213,13 @@ async function fetchOneRoof(address) {
   function findBest(properties) {
     const exact = properties.find(p => norm(p.pureLabel ?? '').startsWith(normStreet));
     if (exact) return exact;
+    // Fallback: require both sides to have a parseable street word that matches.
+    // If resultWord is '' the address has a unit prefix ("4m20...") that broke
+    // the regex — we must not accept those results here; the user didn't give us
+    // a unit number so we can't match a unit-level record.
     return properties.find(p => {
       const resultWord = firstStreetWord(p.pureLabel ?? '');
-      return !resultWord || !queryWord || resultWord === queryWord;
+      return resultWord && queryWord && resultWord === queryWord;
     }) ?? null;
   }
 
@@ -344,27 +348,39 @@ async function fetchHomes(address) {
 
   // Result title must start with the searched street address.
   // Unit-prefixed addresses ("2L/6 Burgoyne St" → "2l6 burgoyne st") don't match.
-  function findExact(results) {
-    return results.find(r => norm(r.Title ?? '').startsWith(normStreet)) ?? null;
+  // On the street-only fallback (checkLocality=true) also require the title to
+  // contain the suburb or city, to prevent cross-city false positives (e.g.
+  // "20 Charlotte Street, Dargaville" when we want Eden Terrace, Auckland).
+  // Note: the TradeMe city field is the region name (e.g. "Manawatu / Whanganui")
+  // which homes may not use; queries 1–2 handle those cases before we get here.
+  const normSuburb = norm(address.suburb ?? '');
+  const normCity   = norm(address.city ?? '');
+  function findExact(results, checkLocality = false) {
+    return results.find(r => {
+      const title = norm(r.Title ?? '');
+      if (!title.startsWith(normStreet)) return false;
+      if (checkLocality) {
+        const locOk = (normSuburb && title.includes(normSuburb)) ||
+                      (normCity   && title.includes(normCity));
+        if (!locOk) return false;
+      }
+      return true;
+    }) ?? null;
   }
 
-  // Build deduplicated query list.
-  // Query 3 (street-only) intentionally has no locality check: the TradeMe
-  // city field is the region name (e.g. "Manawatu / Whanganui"), which homes
-  // doesn't use — it stores properties under the actual city ("Palmerston North").
-  // The house-number + street-name combination is specific enough in NZ to
-  // avoid cross-city false positives at this fallback stage.
   const streetCity = [address.streetAddress, address.city].filter(Boolean).join(', ');
   const queryList = [address.fullAddress, streetCity, address.streetAddress]
     .filter((q, i, arr) => q && arr.indexOf(q) === i); // dedup
 
   let lastError = 'Address not found on homes.co.nz';
 
-  for (const q of queryList) {
+  for (let qi = 0; qi < queryList.length; qi++) {
+    const q            = queryList[qi];
+    const isStreetOnly = qi === queryList.length - 1;
     // ── Search ──────────────────────────────────────────────────────────────
     let exact;
     try {
-      exact = findExact(await homesSearch(q));
+      exact = findExact(await homesSearch(q), isStreetOnly);
     } catch (err) {
       return {
         source:     'homes.co.nz',
@@ -443,6 +459,9 @@ function pvFormatEstimate(lowerBand, upperBand) {
 }
 
 async function fetchPropertyValue(address) {
+  const norm       = s => s.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+  const normStreet = norm(address.streetAddress);
+
   // ── Step 1: Autocomplete → propertyId ────────────────────────────────────
   // PropertyValue's suggestions API returns 404 for some suburb+city
   // combinations (e.g. "Red Beach, Auckland") but succeeds when the city is
@@ -503,6 +522,21 @@ async function fetchPropertyValue(address) {
       confidence: null,
       error:      /PropertyValue/.test(err.message) ? err.message : 'PropertyValue request failed',
     };
+  }
+
+  // Validate that the resolved property matches our street address.
+  // PV suggestions sometimes return a unit record when we searched for the
+  // building (e.g. "1/20 Charlotte Street" when we want "20 Charlotte Street").
+  // The pvPath slug encodes the full address: "20-charlotte-street-eden-terrace-…"
+  // A unit slug would be "1-20-charlotte-street-…" and won't start with normStreet.
+  if (pvPath) {
+    const lastSlug  = pvPath.split('/').filter(Boolean).pop() ?? '';
+    const slugNorm  = norm(lastSlug.replace(/-/g, ' '));
+    if (!slugNorm.startsWith(normStreet)) {
+      return { source: 'PropertyValue', estimate: null,
+               url: PV_BASE_URL + pvPath, confidence: null,
+               error: 'No estimate available on PropertyValue' };
+    }
   }
 
   const range = detail.estimatedRange;
