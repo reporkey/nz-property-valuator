@@ -218,6 +218,22 @@ async function fetchOneRoof(address) {
   const confidence = norm(best.pureLabel ?? '').startsWith(norm(address.streetAddress))
     ? 'high' : 'medium';
 
+  // Street-name guard: reject results for a completely different street.
+  // Extracts the first word of the street name (after the leading house number)
+  // and compares it between the query and the API result.
+  // Example: "50 Edenvale Crescent" vs "50 Eden Crescent" → "edenvale" ≠ "eden" → reject.
+  // Only rejects when both sides parse successfully, so edge-cases fall through.
+  const firstStreetWord = addr => {
+    const m = /^\d+[a-z]?\s+(\w+)/i.exec(norm(addr));
+    return m ? m[1] : '';
+  };
+  const resultWord = firstStreetWord(best.pureLabel ?? '');
+  const queryWord  = firstStreetWord(address.streetAddress);
+  if (resultWord && queryWord && resultWord !== queryWord) {
+    return { source: 'OneRoof', estimate: null, url: null, confidence: null,
+             error: 'Address not found on OneRoof' };
+  }
+
   // ── Step 2: Fetch property page and parse RSC AVM data ────────────────────
   let html;
   try {
@@ -306,6 +322,18 @@ async function fetchHomes(address) {
   const exact      = results.find(r => norm(r.Title ?? '').startsWith(normStreet));
   const best       = exact ?? results[0];
   const confidence = exact ? 'high' : 'medium';
+
+  // Street-name guard: reject results for a clearly different street.
+  // For unit-prefixed titles like "10C, 50 Eden Crescent" the regex won't match
+  // the leading token as a simple house number, so the guard is safely skipped.
+  const firstStreetWord = addr => { const m = /^\d+[a-z]?\s+(\w+)/i.exec(norm(addr)); return m ? m[1] : ''; };
+  const resultWord = firstStreetWord(best.Title ?? '');
+  const queryWord  = firstStreetWord(address.streetAddress);
+  if (resultWord && queryWord && resultWord !== queryWord) {
+    return { source: 'homes.co.nz', estimate: null, url: null, confidence: null,
+             error: 'Address not found on homes.co.nz' };
+  }
+
   const propertyId = best.PropertyID;
 
   // ── Step 2: Fetch estimate card ───────────────────────────────────────────
@@ -507,6 +535,16 @@ async function fetchRealEstate(address) {
       return { source: 'RealEstate.co.nz', estimate: null, url: null, confidence: null,
                error: 'Address not found on RealEstate.co.nz' };
     }
+
+    // Street-name guard: reject results for a completely different street.
+    const firstStreetWord = addr => { const m = /^\d+[a-z]?\s+(\w+)/i.exec(norm(addr)); return m ? m[1] : ''; };
+    const resultWord = firstStreetWord(best['street-address'] ?? '');
+    const queryWord  = firstStreetWord(address.streetAddress);
+    if (resultWord && queryWord && resultWord !== queryWord) {
+      return { source: 'RealEstate.co.nz', estimate: null, url: null, confidence: null,
+               error: 'Address not found on RealEstate.co.nz' };
+    }
+
     listingId = best['listing-id'];
   } catch (err) {
     return { source: 'RealEstate.co.nz', estimate: null, url: null, confidence: null,
