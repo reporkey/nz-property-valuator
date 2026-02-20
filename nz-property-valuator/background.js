@@ -334,7 +334,7 @@ async function fetchHomes(address) {
   const pd      = card.property_details ?? {};
   const lo      = pd.display_estimated_lower_value_short;
   const hi      = pd.display_estimated_upper_value_short;
-  const pageUrl = card.url ? 'https://homes.co.nz' + card.url : null;
+  const pageUrl = card.url ? 'https://homes.co.nz/address' + card.url : null;
 
   if (!lo || !hi) {
     return { source: 'homes.co.nz', estimate: null, url: pageUrl, confidence,
