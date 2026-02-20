@@ -207,19 +207,33 @@ async function fetchOneRoof(address) {
   }
 
   // Find the best matching property from a result set.
-  // Prefers an exact street-address prefix match; falls back to any result
-  // whose first street word matches the query word.
-  // Returns null if no result passes the street-name guard.
-  function findBest(properties) {
-    const exact = properties.find(p => norm(p.pureLabel ?? '').startsWith(normStreet));
+  // checkLocality (true for street-only query): also require the suburb or city
+  // to appear in the label, preventing cross-city matches like
+  // "20 Charlotte Street, Takapau, Hawkes Bay" when we want Eden Terrace, Auckland.
+  const normSuburb = norm(address.suburb ?? '');
+  const normCity   = norm(address.city ?? '');
+  function passesLocality(label, checkLocality) {
+    if (!checkLocality) return true;
+    return (normSuburb && label.includes(normSuburb)) ||
+           (normCity   && label.includes(normCity));
+  }
+
+  function findBest(properties, checkLocality = false) {
+    // Exact: label starts with our street address AND passes locality check.
+    const exact = properties.find(p => {
+      const label = norm(p.pureLabel ?? '');
+      return label.startsWith(normStreet) && passesLocality(label, checkLocality);
+    });
     if (exact) return exact;
     // Fallback: require both sides to have a parseable street word that matches.
     // If resultWord is '' the address has a unit prefix ("4m20...") that broke
     // the regex — we must not accept those results here; the user didn't give us
     // a unit number so we can't match a unit-level record.
     return properties.find(p => {
-      const resultWord = firstStreetWord(p.pureLabel ?? '');
-      return resultWord && queryWord && resultWord === queryWord;
+      const label      = norm(p.pureLabel ?? '');
+      const resultWord = firstStreetWord(label);
+      return resultWord && queryWord && resultWord === queryWord &&
+             passesLocality(label, checkLocality);
     }) ?? null;
   }
 
@@ -227,14 +241,16 @@ async function fetchOneRoof(address) {
   // The city/region from TradeMe (e.g. "Canterbury") can be picked up as a street-name
   // keyword by the OneRoof search API, returning completely unrelated results.
   // Continuing past such false-positive result sets lets us reach a cleaner query.
+  // Locality check is applied only on the last (street-only) query.
   const streetSuburb = [address.streetAddress, address.suburb].filter(Boolean).join(', ');
   const queryList = [address.fullAddress, streetSuburb, address.streetAddress]
     .filter((q, i, arr) => q && arr.indexOf(q) === i); // dedup
 
   let best = null;
   try {
-    for (const q of queryList) {
-      best = findBest(await orSearch(q));
+    for (let qi = 0; qi < queryList.length; qi++) {
+      const isStreetOnly = qi === queryList.length - 1;
+      best = findBest(await orSearch(queryList[qi]), isStreetOnly);
       if (best) break;
     }
   } catch (err) {
@@ -368,8 +384,14 @@ async function fetchHomes(address) {
     }) ?? null;
   }
 
-  const streetCity = [address.streetAddress, address.city].filter(Boolean).join(', ');
-  const queryList = [address.fullAddress, streetCity, address.streetAddress]
+  // Query cascade: fullAddress → street+suburb → street+city → street alone.
+  // street+suburb covers cases where the building record surfaces under the
+  // specific suburb name (e.g. apartments); street+city covers suburb-name
+  // mismatches (e.g. Palmerston North / Terrace End); street-only is the
+  // widest net but requires a locality check to reject cross-city results.
+  const streetSuburb = [address.streetAddress, address.suburb].filter(Boolean).join(', ');
+  const streetCity   = [address.streetAddress, address.city].filter(Boolean).join(', ');
+  const queryList    = [address.fullAddress, streetSuburb, streetCity, address.streetAddress]
     .filter((q, i, arr) => q && arr.indexOf(q) === i); // dedup
 
   let lastError = 'Address not found on homes.co.nz';
