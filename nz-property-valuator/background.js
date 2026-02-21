@@ -670,7 +670,7 @@ async function fetchRealEstate(address) {
 
   if (!propertyShortId) {
     return { source: 'RealEstate.co.nz', estimate: null, url: null, confidence: null,
-             error: 'No estimate available on RealEstate.co.nz' };
+             error: 'Address not found on RealEstate.co.nz' };
   }
 
   // ── Step 3: Properties API → AVM + canonical URL ──────────────────────────
