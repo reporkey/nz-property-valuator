@@ -210,10 +210,9 @@ async function fetchOneRoof(address) {
         .map(p => ({ p, r: matchAddress(qParsed, parseAddress(p.pureLabel ?? '')) }))
         .filter(x => x.r.match);
       if (!ranked.length) return null;
-      // Prefer building-level (no unit) over unit fallbacks, then highest confidence.
+      // Prefer highest confidence.
       const CONF = ['high', 'medium', 'low'];
       ranked.sort((a, b) =>
-        (a.r.unitFallback ? 1 : 0) - (b.r.unitFallback ? 1 : 0) ||
         CONF.indexOf(a.r.confidence) - CONF.indexOf(b.r.confidence)
       );
       return ranked[0].p;
@@ -630,10 +629,9 @@ async function fetchRealEstate(address) {
       .map(r => ({ r, m: matchAddress(qParsed, parseAddress(r['street-address'] ?? '')) }))
       .filter(x => x.m.match);
     if (!ranked.length) return null;
-    // Prefer building-level (no unit) over unit fallbacks, then highest confidence.
+    // Prefer highest confidence.
     const CONF = ['high', 'medium', 'low'];
     ranked.sort((a, b) =>
-      (a.m.unitFallback ? 1 : 0) - (b.m.unitFallback ? 1 : 0) ||
       CONF.indexOf(a.m.confidence) - CONF.indexOf(b.m.confidence)
     );
     return ranked[0].r;
@@ -758,7 +756,16 @@ function runFetchers(address, sources, tabId, sendResponse) {
       };
     });
 
-    setCached(address.fullAddress, results);
+    // Don't cache transient errors (timeout, HTTP 5xx, network failure) so
+    // that Retry causes a real re-fetch rather than replaying the same error.
+    const hasTransientError = results.some(r =>
+      r.error &&
+      !/address not found|no estimate|not available/i.test(r.error) &&
+      !r.disabled
+    );
+    if (!hasTransientError) {
+      setCached(address.fullAddress, results);
+    }
     recordFetchStatus(results); // fire-and-forget
     sendResponse({ ok: true, results, fromCache: false });
   });

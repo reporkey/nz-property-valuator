@@ -22,8 +22,6 @@
 (() => {
   'use strict';
 
-  const LOG = '[NZ-Valuator]';
-
   // ─── JSON-LD extraction ───────────────────────────────────────────────────
   // RealEstate.co.nz always injects a SingleFamilyResidence JSON-LD block.
   // streetAddress includes the suburb after a comma:

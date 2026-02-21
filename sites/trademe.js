@@ -13,8 +13,6 @@
 (() => {
   'use strict';
 
-  const LOG = '[NZ-Valuator]';
-
   // ─── Strategy 1: JSON-LD ──────────────────────────────────────────────────
   function extractFromJsonLd() {
     const scripts = document.querySelectorAll('script[type="application/ld+json"]');
