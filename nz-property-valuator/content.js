@@ -160,16 +160,47 @@
   // the given source.  Used when a source returns "Not found" so we can still
   // show a useful fallback link.
 
-  function buildSearchUrl(sourceName) {
+  function buildSearchUrl(sourceName, address) {
+    function slugify(s) { return (s || '').toLowerCase().replace(/\s+/g, '-'); }
+
     switch (sourceName) {
       case 'OneRoof':
+        // No URL-based pre-fill (needs numeric location ID); link to estimate map.
         return 'https://www.oneroof.co.nz/estimate/map/region_all-new-zealand-1';
-      case 'homes.co.nz':
+
+      case 'homes.co.nz': {
+        // Verified URL pattern: /map/{city}/{suburb}/{street}
+        // e.g. homes.co.nz/map/auckland/eden-terrace/charlotte-street
+        const city   = slugify(address.city);
+        const suburb = slugify(address.suburb);
+        // Strip leading house number ("20 Charlotte Street" → "charlotte-street")
+        const street = slugify((address.streetAddress || '').replace(/^\d+\w*\s+/, ''));
+        if (city && suburb && street)
+          return `https://homes.co.nz/map/${city}/${suburb}/${street}`;
+        if (city && suburb)
+          return `https://homes.co.nz/map/${city}/${suburb}`;
         return 'https://homes.co.nz/';
+      }
+
       case 'PropertyValue':
+        // No search results page; autocomplete navigates directly to property page.
         return 'https://www.propertyvalue.co.nz/';
-      case 'RealEstate.co.nz':
+
+      case 'RealEstate.co.nz': {
+        // Verified URL pattern: /residential/sale/{region}/{district}/{suburb}
+        // TradeMe URL path: /a/property/{type}/{status}/{region}/{district}/{suburb}/listing/{id}
+        const parts = location.pathname.split('/');
+        const idx   = parts.indexOf('listing');
+        if (idx >= 3) {
+          const region   = parts[idx - 3];
+          const district = parts[idx - 2];
+          const suburb   = parts[idx - 1];
+          if (region && district && suburb)
+            return `https://www.realestate.co.nz/residential/sale/${region}/${district}/${suburb}`;
+        }
         return 'https://www.realestate.co.nz/residential/sale/';
+      }
+
       default:
         return null;
     }
@@ -358,7 +389,7 @@
       estimateEl.className   = 'nzvp-estimate nzvp-not-found';
       estimateEl.textContent = result.disabled ? 'No estimate' : 'Not found';
       if (!result.disabled && address) {
-        const sUrl = buildSearchUrl(sourceName);
+        const sUrl = buildSearchUrl(sourceName, address);
         if (sUrl) {
           linkEl.href        = sUrl;
           linkEl.textContent = `Search on ${sourceName} \u2192`;
