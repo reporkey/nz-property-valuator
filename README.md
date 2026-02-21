@@ -51,4 +51,4 @@ Fully functional. All four valuation sources (OneRoof, homes.co.nz, PropertyValu
 
 ## Support
 
-If this extension saves you time, [☕ buy me a coffee](https://buymeacoffee.com/YOUR_USERNAME) — it's appreciated but never expected.
+If this extension saves you time, [☕ buy me a coffee](https://buymeacoffee.com/reporkey) — it's appreciated but never expected.

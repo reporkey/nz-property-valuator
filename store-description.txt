@@ -1,47 +1,7 @@
-Buying or selling a property in New Zealand? NZ Property Valuator shows you what four of the country's biggest property data sites think a home is worth — all in one panel, without leaving the listing you're already looking at.
+🏠 See what any NZ property is worth from four sources — without leaving the listing you're on.
 
-HOW IT WORKS
+Open a listing on TradeMe, OneRoof, or RealEstate.co.nz and a panel instantly shows estimates from OneRoof, homes.co.nz, PropertyValue.co.nz, and RealEstate.co.nz.
 
-Open any property listing on TradeMe, OneRoof, or RealEstate.co.nz and a small panel appears on the page. Within a few seconds it fills in with estimated values from OneRoof, homes.co.nz, PropertyValue.co.nz, and RealEstate.co.nz. Each estimate loads as soon as it's ready — you don't have to wait for all four before you start reading.
-
-Each card shows the current estimated value or value range, a confidence level where the source provides one, and a direct link to the property's page on that site so you can dig deeper if you want.
-
-WHY USE FOUR SOURCES?
-
-No single valuation site has it right every time. Different platforms use different data and different methods, so their estimates can vary — sometimes by a significant margin. Seeing all four together gives you a much clearer picture of where a property's value likely sits. If three sources cluster around the same number and one is an outlier, that's useful to know. If all four are spread wide apart, that tells you something too.
-
-It's the same research most buyers and sellers quietly do by hand — opening tabs, searching each site separately, trying to remember what each one said — just done for you automatically, in seconds, on the page you're already reading.
-
-SOURCES
-
-• OneRoof — property data platform backed by NZME, New Zealand's largest media company.
-• homes.co.nz — valuation estimates built on historical sales data and market trends.
-• PropertyValue.co.nz — independent estimates with low/high ranges and confidence ratings.
-• RealEstate.co.nz — value estimates from one of New Zealand's most-used property portals.
-
-WORKS WHERE YOU ALREADY BROWSE
-
-The panel appears automatically on:
-• TradeMe property listings (trademe.co.nz)
-• OneRoof property pages (oneroof.co.nz)
-• RealEstate.co.nz property pages (realestate.co.nz)
-
-You can also toggle individual sources on or off from the extension popup if you only want to see certain ones.
-
-FREE AND PRIVATE
-
-NZ Property Valuator is completely free. There's no account to create, no email address to hand over, and no sign-in of any kind.
-
-It collects no personal data, runs no analytics, and tracks nothing about your browsing. When you look up a property, your browser fetches the estimates directly from each source — nothing goes through a third-party server in between.
-
-OPEN SOURCE
-
-The full source code is publicly available at github.com/reporkey/nz-property-valuator. Anyone can read exactly what the extension does.
-
----
-
-Whether you're a first-home buyer trying to figure out if an asking price is realistic, an investor comparing suburbs, or a seller wondering what your place might fetch — NZ Property Valuator gives you a fast, free, private second opinion from four sources at once.
-
----
-
-If this saves you time, you can buy me a coffee at buymeacoffee.com/YOUR_USERNAME — it's appreciated but never expected.
+💰 Four sources, one page — spot when estimates agree or diverge.
+🔒 Free, private, no sign-in, no data collected.
+☕ If it saves you time, buy me a coffee at buymeacoffee.com/reporkey
