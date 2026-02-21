@@ -620,7 +620,7 @@ async function fetchRealEstate(address) {
     const ranked = listings
       .map(r => ({ r, m: matchAddress(qParsed, parseAddress(r['street-address'] ?? '')) }))
       .filter(x => x.m.match);
-    if (!ranked.length) return listings[0] ?? null; // fallback: first result
+    if (!ranked.length) return null;
     // Prefer building-level (no unit) over unit fallbacks, then highest confidence.
     const CONF = ['high', 'medium', 'low'];
     ranked.sort((a, b) =>
