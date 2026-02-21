@@ -403,6 +403,13 @@
         linkEl.href        = result.url;
         linkEl.textContent = `View on ${sourceName} \u2192`;
         linkEl.hidden      = false;
+      } else if (address) {
+        const sUrl = buildSearchUrl(sourceName, address);
+        if (sUrl) {
+          linkEl.href        = sUrl;
+          linkEl.textContent = `Search on ${sourceName} \u2192`;
+          linkEl.hidden      = false;
+        } else { linkEl.hidden = true; }
       } else { linkEl.hidden = true; }
     } else {
       estimateEl.className   = 'nzvp-estimate nzvp-error-state';
