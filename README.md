@@ -48,3 +48,7 @@ nz-property-valuator/
 ## Status
 
 Fully functional. All four valuation sources (OneRoof, homes.co.nz, PropertyValue, RealEstate.co.nz) are implemented and active across all three supported listing sites.
+
+## Support
+
+If this extension saves you time, [☕ buy me a coffee](https://buymeacoffee.com/YOUR_USERNAME) — it's appreciated but never expected.

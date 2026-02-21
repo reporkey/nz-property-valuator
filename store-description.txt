@@ -41,3 +41,7 @@ The full source code is publicly available at github.com/reporkey/nz-property-va
 ---
 
 Whether you're a first-home buyer trying to figure out if an asking price is realistic, an investor comparing suburbs, or a seller wondering what your place might fetch — NZ Property Valuator gives you a fast, free, private second opinion from four sources at once.
+
+---
+
+If this saves you time, you can buy me a coffee at buymeacoffee.com/YOUR_USERNAME — it's appreciated but never expected.
