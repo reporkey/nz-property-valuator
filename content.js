@@ -147,11 +147,25 @@
     if (!raw) { raw = extractFromDom();      source = raw ? 'DOM' : null; }
     if (!raw) return null;
 
-    // Override suburb with the URL slug — it's always the true suburb on TradeMe.
+    // Override suburb with the URL slug — it's usually the true suburb on TradeMe.
     const urlSuburb = suburbFromUrl();
     if (urlSuburb && urlSuburb !== raw.suburb) {
       console.log(LOG, `Suburb corrected from URL: "${raw.suburb}" → "${urlSuburb}"`);
       raw = { ...raw, suburb: urlSuburb };
+    }
+
+    // When TradeMe has no distinct suburb it repeats the district slug in the URL
+    // (e.g. /ashburton/ashburton/listing/...).  In that case the URL gives no useful
+    // suburb signal and JSON-LD's addressLocality is just the district name too.
+    // Fall back to the DOM h1 which often has the real suburb (e.g. "Rakaia").
+    const urlParts    = location.pathname.split('/');
+    const listingIdx  = urlParts.indexOf('listing');
+    if (listingIdx >= 2 && urlParts[listingIdx - 1] === urlParts[listingIdx - 2]) {
+      const domRaw = extractFromDom();
+      if (domRaw?.suburb && domRaw.suburb !== raw.suburb) {
+        console.log(LOG, `Suburb refined from DOM (no URL suburb): "${raw.suburb}" → "${domRaw.suburb}"`);
+        raw = { ...raw, suburb: domRaw.suburb };
+      }
     }
 
     const address = normalize(raw);
