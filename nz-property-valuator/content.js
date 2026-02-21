@@ -22,6 +22,10 @@
   // Sources shown in the panel (fetched via background.js).
   const SOURCES = ['OneRoof', 'homes.co.nz', 'PropertyValue', 'RealEstate.co.nz'];
 
+  // Shorter display names used in link labels.
+  const LINK_NAME = { 'homes.co.nz': 'homes', 'RealEstate.co.nz': 'RealEstate' };
+  function linkName(source) { return LINK_NAME[source] || source; }
+
   // ─── Module state ─────────────────────────────────────────────────────────
   let currentShadow  = null;   // shadow root of the active panel
   let currentAddress = null;   // last address passed to requestValuations
@@ -365,7 +369,7 @@
       estimateEl.textContent = result.estimate;
       if (result.url) {
         linkEl.href        = result.url;
-        linkEl.textContent = `View on ${sourceName} \u2192`;
+        linkEl.textContent = `View on ${linkName(sourceName)} \u2192`;
         linkEl.hidden      = false;
       } else { linkEl.hidden = true; }
     } else if (result.disabled || !result.error || /address not found/i.test(result.error)) {
@@ -375,7 +379,7 @@
         const sUrl = buildSearchUrl(sourceName, address);
         if (sUrl) {
           linkEl.href        = sUrl;
-          linkEl.textContent = `Search on ${sourceName} \u2192`;
+          linkEl.textContent = `Search on ${linkName(sourceName)} \u2192`;
           linkEl.hidden      = false;
         } else { linkEl.hidden = true; }
       } else { linkEl.hidden = true; }
@@ -384,7 +388,7 @@
       estimateEl.textContent = 'No estimate';
       if (result.url) {
         linkEl.href        = result.url;
-        linkEl.textContent = `View on ${sourceName} \u2192`;
+        linkEl.textContent = `View on ${linkName(sourceName)} \u2192`;
         linkEl.hidden      = false;
       } else { linkEl.hidden = true; }
     } else {
