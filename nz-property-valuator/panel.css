@@ -15,7 +15,6 @@
   border-radius: 12px;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.10), 0 1px 3px rgba(0, 0, 0, 0.06);
   overflow: hidden;
-  max-width: 640px;
   /* Enable container queries so the card grid responds to the panel's own
      width, not the viewport — critical when the panel lands in a sidebar. */
   container-type: inline-size;
@@ -63,19 +62,31 @@
 
 .nzvp-cards {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(4, 1fr);
   gap: 12px;
 }
 
-/* Stack cards when the panel itself is narrow (e.g. inside a sidebar). */
-@container nzvp (max-width: 400px) {
+/* Drop to 2 columns when the panel is narrow. */
+@container nzvp (max-width: 560px) {
+  .nzvp-cards {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+/* Stack to 1 column when very narrow. */
+@container nzvp (max-width: 300px) {
   .nzvp-cards {
     grid-template-columns: 1fr;
   }
 }
 
 /* Fallback for browsers without container query support. */
-@media (max-width: 460px) {
+@media (max-width: 600px) {
+  .nzvp-cards {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+@media (max-width: 340px) {
   .nzvp-cards {
     grid-template-columns: 1fr;
   }
@@ -104,12 +115,13 @@
 /* ── Estimate states ─────────────────────────────────────────────────────── */
 
 .nzvp-estimate {
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 700;
-  min-height: 30px;
+  min-height: 28px;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .nzvp-estimate.nzvp-success {
