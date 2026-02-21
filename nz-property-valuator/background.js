@@ -7,6 +7,8 @@
 
 'use strict';
 
+importScripts('addressMatcher.js');
+
 // ─── In-memory cache ──────────────────────────────────────────────────────
 // Keyed by fullAddress string; entries expire after 30 minutes.
 // The service worker may be terminated between page loads but survives across
@@ -185,17 +187,7 @@ function parseOrAvm(html) {
 
 async function fetchOneRoof(address) {
   // ── Step 1: Resolve address to slug ───────────────────────────────────────
-  const norm = s => s.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
-  const normStreet = norm(address.streetAddress);
-
-  // Extract the first distinctive word of the street name (after the house number).
-  // Used to reject results from a completely different street.
-  // Example: "50 Edenvale Crescent" → "edenvale"; "50 Eden Crescent" → "eden".
-  const firstStreetWord = addr => {
-    const m = /^\d+[a-z]?\s+(\w+)/i.exec(norm(addr));
-    return m ? m[1] : '';
-  };
-  const queryWord = firstStreetWord(address.streetAddress);
+  const qParsed = parseAddress(address.streetAddress, address.suburb, address.city);
 
   async function orSearch(key) {
     const url = `${OR_BASE_URL}/v2.6/address/search?isMix=1` +
@@ -206,35 +198,18 @@ async function fetchOneRoof(address) {
     return data.properties ?? [];
   }
 
-  // Find the best matching property from a result set.
-  // checkLocality (true for street-only query): also require the suburb or city
-  // to appear in the label, preventing cross-city matches like
-  // "20 Charlotte Street, Takapau, Hawkes Bay" when we want Eden Terrace, Auckland.
-  const normSuburb = norm(address.suburb ?? '');
-  const normCity   = norm(address.city ?? '');
-  function passesLocality(label, checkLocality) {
-    if (!checkLocality) return true;
-    return (normSuburb && label.includes(normSuburb)) ||
-           (normCity   && label.includes(normCity));
-  }
-
-  function findBest(properties, checkLocality = false) {
-    // Exact: label starts with our street address AND passes locality check.
-    const exact = properties.find(p => {
-      const label = norm(p.pureLabel ?? '');
-      return label.startsWith(normStreet) && passesLocality(label, checkLocality);
-    });
-    if (exact) return exact;
-    // Fallback: require both sides to have a parseable street word that matches.
-    // If resultWord is '' the address has a unit prefix ("4m20...") that broke
-    // the regex — we must not accept those results here; the user didn't give us
-    // a unit number so we can't match a unit-level record.
-    return properties.find(p => {
-      const label      = norm(p.pureLabel ?? '');
-      const resultWord = firstStreetWord(label);
-      return resultWord && queryWord && resultWord === queryWord &&
-             passesLocality(label, checkLocality);
-    }) ?? null;
+  function findBest(properties) {
+    const ranked = properties
+      .map(p => ({ p, r: matchAddress(qParsed, parseAddress(p.pureLabel ?? '')) }))
+      .filter(x => x.r.match);
+    if (!ranked.length) return null;
+    // Prefer building-level (no unit) over unit fallbacks, then highest confidence.
+    const CONF = ['high', 'medium', 'low'];
+    ranked.sort((a, b) =>
+      (a.r.unitFallback ? 1 : 0) - (b.r.unitFallback ? 1 : 0) ||
+      CONF.indexOf(a.r.confidence) - CONF.indexOf(b.r.confidence)
+    );
+    return ranked[0].p;
   }
 
   // Fallback query cascade: fullAddress → street + suburb (drops city) → street alone.
@@ -249,8 +224,7 @@ async function fetchOneRoof(address) {
   let best = null;
   try {
     for (let qi = 0; qi < queryList.length; qi++) {
-      const isStreetOnly = qi === queryList.length - 1;
-      best = findBest(await orSearch(queryList[qi]), isStreetOnly);
+      best = findBest(await orSearch(queryList[qi]));
       if (best) break;
     }
   } catch (err) {
@@ -270,7 +244,7 @@ async function fetchOneRoof(address) {
 
   const slug       = best.slug;   // "auckland/remuera/10-mahoe-avenue/qeHJ8"
   const pageUrl    = `${OR_BASE_URL}/property/${slug}`;
-  const confidence = norm(best.pureLabel ?? '').startsWith(normStreet) ? 'high' : 'medium';
+  const confidence = matchAddress(qParsed, parseAddress(best.pureLabel ?? '')).confidence ?? 'medium';
 
   // ── Step 2: Fetch property page and parse RSC AVM data ────────────────────
   let html;
@@ -350,8 +324,7 @@ async function fetchHomes(address) {
   //   3. streetAddress only — widest net; locality check (suburb OR city in
   //                           title) to avoid cross-city false positives.
 
-  const norm       = s => s.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
-  const normStreet = norm(address.streetAddress);
+  const qParsed = parseAddress(address.streetAddress, address.suburb, address.city);
 
   async function homesSearch(query) {
     const resp = await fetchWithBackoff(
@@ -362,26 +335,15 @@ async function fetchHomes(address) {
     return (await resp.json()).Results ?? [];
   }
 
-  // Result title must start with the searched street address.
-  // Unit-prefixed addresses ("2L/6 Burgoyne St" → "2l6 burgoyne st") don't match.
-  // On the street-only fallback (checkLocality=true) also require the title to
-  // contain the suburb or city, to prevent cross-city false positives (e.g.
-  // "20 Charlotte Street, Dargaville" when we want Eden Terrace, Auckland).
-  // Note: the TradeMe city field is the region name (e.g. "Manawatu / Whanganui")
-  // which homes may not use; queries 1–2 handle those cases before we get here.
-  const normSuburb = norm(address.suburb ?? '');
-  const normCity   = norm(address.city ?? '');
-  function findExact(results, checkLocality = false) {
-    return results.find(r => {
-      const title = norm(r.Title ?? '');
-      if (!title.startsWith(normStreet)) return false;
-      if (checkLocality) {
-        const locOk = (normSuburb && title.includes(normSuburb)) ||
-                      (normCity   && title.includes(normCity));
-        if (!locOk) return false;
-      }
-      return true;
-    }) ?? null;
+  function findExact(results) {
+    const matches = results.filter(r => matchAddress(qParsed, parseAddress(r.Title ?? '')).match);
+    if (!matches.length) return null;
+    // Prefer building-level record (no unit) when query has no unit.
+    if (qParsed.unitNum === null) {
+      const noUnit = matches.find(r => parseAddress(r.Title ?? '').unitNum === null);
+      if (noUnit) return noUnit;
+    }
+    return matches[0];
   }
 
   // Query cascade: fullAddress → street+suburb → street+city → street alone.
@@ -402,7 +364,7 @@ async function fetchHomes(address) {
     // ── Search ──────────────────────────────────────────────────────────────
     let exact;
     try {
-      exact = findExact(await homesSearch(q), isStreetOnly);
+      exact = findExact(await homesSearch(q));
     } catch (err) {
       return {
         source:     'homes.co.nz',
@@ -481,8 +443,7 @@ function pvFormatEstimate(lowerBand, upperBand) {
 }
 
 async function fetchPropertyValue(address) {
-  const norm       = s => s.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
-  const normStreet = norm(address.streetAddress);
+  const qParsed = parseAddress(address.streetAddress, address.suburb, address.city);
 
   // ── Step 1: Autocomplete → propertyId ────────────────────────────────────
   // PropertyValue's suggestions API returns 404 for some suburb+city
@@ -549,12 +510,14 @@ async function fetchPropertyValue(address) {
   // Validate that the resolved property matches our street address.
   // PV suggestions sometimes return a unit record when we searched for the
   // building (e.g. "1/20 Charlotte Street" when we want "20 Charlotte Street").
-  // The pvPath slug encodes the full address: "20-charlotte-street-eden-terrace-…"
-  // A unit slug would be "1-20-charlotte-street-…" and won't start with normStreet.
+  // Parse the slug as an address and compare components.
   if (pvPath) {
-    const lastSlug  = pvPath.split('/').filter(Boolean).pop() ?? '';
-    const slugNorm  = norm(lastSlug.replace(/-/g, ' '));
-    if (!slugNorm.startsWith(normStreet)) {
+    const lastSlug = pvPath.split('/').filter(Boolean).pop() ?? '';
+    const slugStr  = lastSlug.replace(/-/g, ' ').replace(/\d{5,}\s*$/, '').trim();
+    const cParsed  = parseAddress(slugStr);
+    const unitMismatch  = qParsed.unitNum === null && cParsed.unitNum !== null;
+    const houseMismatch = qParsed.houseNum && cParsed.houseNum && qParsed.houseNum !== cParsed.houseNum;
+    if (unitMismatch || houseMismatch) {
       return { source: 'PropertyValue', estimate: null,
                url: PV_BASE_URL + pvPath, confidence: null,
                error: 'No estimate available on PropertyValue' };
@@ -611,8 +574,7 @@ async function fetchRealEstate(address) {
   // The suburb from TradeMe (e.g. "Terrace End") may not match RealEstate's
   // indexing, so the shorter query surfaces listings that the full query misses.
 
-  const norm       = s => s.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
-  const normStreet = norm(address.streetAddress);
+  const qParsed = parseAddress(address.streetAddress, address.suburb, address.city);
 
   async function reSmartSearch(q) {
     const resp = await fetchWithBackoff(
@@ -625,12 +587,18 @@ async function fetchRealEstate(address) {
   }
 
   function pickBest(listings) {
-    const exact = listings.find(r => norm(r['street-address'] ?? '').startsWith(normStreet));
-    return exact ?? listings[0] ?? null;
+    const ranked = listings
+      .map(r => ({ r, m: matchAddress(qParsed, parseAddress(r['street-address'] ?? '')) }))
+      .filter(x => x.m.match);
+    if (!ranked.length) return listings[0] ?? null; // fallback: first result
+    // Prefer building-level (no unit) over unit fallbacks, then highest confidence.
+    const CONF = ['high', 'medium', 'low'];
+    ranked.sort((a, b) =>
+      (a.m.unitFallback ? 1 : 0) - (b.m.unitFallback ? 1 : 0) ||
+      CONF.indexOf(a.m.confidence) - CONF.indexOf(b.m.confidence)
+    );
+    return ranked[0].r;
   }
-
-  const firstStreetWord = addr => { const m = /^\d+[a-z]?\s+(\w+)/i.exec(norm(addr)); return m ? m[1] : ''; };
-  const queryWord = firstStreetWord(address.streetAddress);
 
   let listingId;
   try {
@@ -644,13 +612,6 @@ async function fetchRealEstate(address) {
 
     const best = pickBest(listings);
     if (!best) {
-      return { source: 'RealEstate.co.nz', estimate: null, url: null, confidence: null,
-               error: 'Address not found on RealEstate.co.nz' };
-    }
-
-    // Street-name guard: reject results for a completely different street.
-    const resultWord = firstStreetWord(best['street-address'] ?? '');
-    if (resultWord && queryWord && resultWord !== queryWord) {
       return { source: 'RealEstate.co.nz', estimate: null, url: null, confidence: null,
                error: 'Address not found on RealEstate.co.nz' };
     }
