@@ -1,15 +1,16 @@
 /**
  * content.js — Content script for NZ Property Valuator
  *
- * Injected into matching TradeMe property listing pages.
- * Responsible for scraping listing data and rendering the valuation panel.
+ * Injected after a site adapter (e.g. sites/trademe.js) which sets
+ * window.NZValuatorAdapter before this file runs.
+ *
+ * Responsible for rendering the valuation panel and requesting estimates
+ * from background.js via chrome.runtime messaging.
+ *
+ * Site-specific logic (address extraction, listing-page detection,
+ * panel anchor selection) lives entirely in the adapter.
  *
  * Runs at: document_idle
- * Matches:  https://www.trademe.co.nz/a/*
- *
- * TradeMe is a fully client-side Angular SPA.
- * JSON-LD and DOM content are injected dynamically after bootstrap, so we
- * observe the DOM and retry until the address is found or a timeout is hit.
  */
 
 (() => {
@@ -32,147 +33,6 @@
   let pollTimer      = null;   // setTimeout handle for the active poll cycle
   let pollStart      = 0;      // Date.now() when the current poll cycle began
 
-  // ─── Strategy 1: JSON-LD ──────────────────────────────────────────────────
-  // TradeMe injects a <script type="application/ld+json"> with:
-  //   @type: "RealEstateListing"
-  //   mainEntity.address: { @type: "PostalAddress",
-  //                         streetAddress, addressLocality, addressRegion }
-  function extractFromJsonLd() {
-    const scripts = document.querySelectorAll('script[type="application/ld+json"]');
-    for (const script of scripts) {
-      let data;
-      try { data = JSON.parse(script.textContent); } catch { continue; }
-
-      const items = Array.isArray(data) ? data : [data];
-      for (const item of items) {
-        const addr = item.address || (item.mainEntity && item.mainEntity.address);
-        if (!addr) continue;
-        const streetAddress = (addr.streetAddress || '').trim();
-        const suburb        = (addr.addressLocality || '').trim();
-        const city          = (addr.addressRegion   || '').trim();
-        if (streetAddress) return { streetAddress, suburb, city };
-      }
-    }
-    return null;
-  }
-
-  // ─── Strategy 2: __NEXT_DATA__ ────────────────────────────────────────────
-  // Not used by TradeMe (Angular app), kept for completeness.
-  function extractFromNextData() {
-    const script = document.getElementById('__NEXT_DATA__');
-    if (!script) return null;
-    let root;
-    try { root = JSON.parse(script.textContent); } catch { return null; }
-
-    function walk(node, depth) {
-      if (!node || typeof node !== 'object' || depth > 8) return null;
-      if (Array.isArray(node)) {
-        for (const child of node) {
-          const r = walk(child, depth + 1);
-          if (r) return r;
-        }
-        return null;
-      }
-      const streetAddress = node.streetAddress || node.street || node.address1 || '';
-      const suburb = node.suburb || node.addressLocality || node.locality || node.district || '';
-      const city   = node.city  || node.addressRegion   || node.region  || '';
-      if (streetAddress) {
-        return {
-          streetAddress: String(streetAddress).trim(),
-          suburb:        String(suburb).trim(),
-          city:          String(city).trim(),
-        };
-      }
-      for (const value of Object.values(node)) {
-        const r = walk(value, depth + 1);
-        if (r) return r;
-      }
-      return null;
-    }
-    return walk(root, 0);
-  }
-
-  // ─── Strategy 3: DOM fallback ─────────────────────────────────────────────
-  // TradeMe renders the full address in an <h1>.
-  function extractFromDom() {
-    const selectors = [
-      '[data-testid*="address"]', '[data-testid*="Address"]',
-      '[class*="property-address"]', '[class*="propertyAddress"]',
-      '[class*="listing-address"]', 'h1',
-    ];
-    for (const sel of selectors) {
-      const el = document.querySelector(sel);
-      if (!el) continue;
-      const text  = el.textContent.trim();
-      if (!text) continue;
-      const parts = text.split(',').map(p => p.trim()).filter(Boolean);
-      if (parts.length >= 1) {
-        return { streetAddress: parts[0] || '', suburb: parts[1] || '', city: parts[2] || '' };
-      }
-    }
-    return null;
-  }
-
-  function normalize({ streetAddress, suburb, city }) {
-    // TradeMe sometimes appends the suburb to the streetAddress field in JSON-LD,
-    // e.g. "865 Waikaretu Valley Road Tuakau" when suburb = "Tuakau".
-    // Strip it so it doesn't duplicate in fullAddress and corrupt search queries.
-    let street = streetAddress;
-    if (suburb) {
-      const esc = suburb.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      street = street.replace(new RegExp('\\s+' + esc + '\\s*$', 'i'), '').trim();
-    }
-    const parts = [street, suburb, city].filter(Boolean);
-    return { streetAddress: street, suburb, city, fullAddress: parts.join(', ') };
-  }
-
-  // TradeMe's JSON-LD uses addressLocality for the *district* (e.g. "Waitakere City"),
-  // not the actual suburb (e.g. "Sunnyvale").  The real suburb is always in the URL:
-  //   /a/property/{type}/{status}/{region}/{district}/{suburb}/listing/{id}
-  // Extracting it from the slug is more reliable than any DOM heuristic.
-  function suburbFromUrl() {
-    const parts      = location.pathname.split('/');
-    const listingIdx = parts.indexOf('listing');
-    if (listingIdx < 2) return null;
-    const slug = parts[listingIdx - 1];
-    if (!slug) return null;
-    // "waitakere-city" → "Waitakere City", "st-heliers" → "St Heliers"
-    return slug.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-  }
-
-  function tryExtract() {
-    let raw = extractFromJsonLd();
-    let source = raw ? 'JSON-LD' : null;
-    if (!raw) { raw = extractFromNextData(); source = raw ? '__NEXT_DATA__' : null; }
-    if (!raw) { raw = extractFromDom();      source = raw ? 'DOM' : null; }
-    if (!raw) return null;
-
-    // Override suburb with the URL slug — it's usually the true suburb on TradeMe.
-    const urlSuburb = suburbFromUrl();
-    if (urlSuburb && urlSuburb !== raw.suburb) {
-      console.log(LOG, `Suburb corrected from URL: "${raw.suburb}" → "${urlSuburb}"`);
-      raw = { ...raw, suburb: urlSuburb };
-    }
-
-    // When TradeMe has no distinct suburb it repeats the district slug in the URL
-    // (e.g. /ashburton/ashburton/listing/...).  In that case the URL gives no useful
-    // suburb signal and JSON-LD's addressLocality is just the district name too.
-    // Fall back to the DOM h1 which often has the real suburb (e.g. "Rakaia").
-    const urlParts    = location.pathname.split('/');
-    const listingIdx  = urlParts.indexOf('listing');
-    if (listingIdx >= 2 && urlParts[listingIdx - 1] === urlParts[listingIdx - 2]) {
-      const domRaw = extractFromDom();
-      if (domRaw?.suburb && domRaw.suburb !== raw.suburb) {
-        console.log(LOG, `Suburb refined from DOM (no URL suburb): "${raw.suburb}" → "${domRaw.suburb}"`);
-        raw = { ...raw, suburb: domRaw.suburb };
-      }
-    }
-
-    const address = normalize(raw);
-    console.log(LOG, `Address extracted via ${source}:`, address);
-    return address;
-  }
-
   // ─── Search URL builder ───────────────────────────────────────────────────
   // Returns a URL the user can visit to manually search for the property on
   // the given source.  Used when a source returns "Not found" so we can still
@@ -188,7 +48,6 @@
 
       case 'homes.co.nz': {
         // Verified URL pattern: /map/{city}/{suburb}/{street}
-        // e.g. homes.co.nz/map/auckland/eden-terrace/charlotte-street
         const city   = slugify(address.city);
         const suburb = slugify(address.suburb);
         // Strip leading house number ("20 Charlotte Street" → "charlotte-street")
@@ -206,16 +65,11 @@
 
       case 'RealEstate.co.nz': {
         // Verified URL pattern: /residential/sale/{region}/{district}/{suburb}
-        // TradeMe URL path: /a/property/{type}/{status}/{region}/{district}/{suburb}/listing/{id}
-        const parts = location.pathname.split('/');
-        const idx   = parts.indexOf('listing');
-        if (idx >= 3) {
-          const region   = parts[idx - 3];
-          const district = parts[idx - 2];
-          const suburb   = parts[idx - 1];
-          if (region && district && suburb)
-            return `https://www.realestate.co.nz/residential/sale/${region}/${district}/${suburb}`;
-        }
+        // Use address components so this works on all host sites (not just TradeMe).
+        const suburb = slugify(address.suburb);
+        const city   = slugify(address.city);
+        if (suburb && city)
+          return `https://www.realestate.co.nz/residential/sale/all/${city}/${suburb}`;
         return 'https://www.realestate.co.nz/residential/sale/';
       }
 
@@ -252,9 +106,9 @@
   }
 
   // ─── Panel injection ──────────────────────────────────────────────────────
-  // Inserts at document.body.prepend immediately (before Angular renders) so
-  // the user sees the panel in loading state right away.  relocatePanel()
-  // moves it to a better position once Angular has rendered the property page.
+  // Inserts at document.body.prepend immediately so the user sees the panel
+  // in loading state right away.  relocatePanel() moves it once the page
+  // has rendered the preferred anchor element.
 
   function injectPanel() {
     const existing = document.getElementById('nz-valuator-host');
@@ -269,29 +123,13 @@
     return shadow;
   }
 
-  // Move the panel to a better location once Angular has rendered the page.
+  // Move the panel to the adapter's preferred anchor, if one is found.
   function relocatePanel() {
     const host = document.getElementById('nz-valuator-host');
     if (!host) return;
 
-    // Only use highly specific anchors — broad class selectors like
-    // [class*="property-header"] falsely match sidebar widgets on some listings.
-    const anchors = [
-      'tm-property-homes-estimate',
-      '[data-testid*="homes-estimate"]',
-      '[class*="homes-estimate"]',
-      '[class*="HomesEstimate"]',
-    ];
-    for (const sel of anchors) {
-      const el = document.querySelector(sel);
-      if (el) { el.insertAdjacentElement('afterend', host); return; }
-    }
-
-    // For the h1 fallback, prefer a heading inside the main content area
-    // so we don't accidentally land in the agent sidebar.
-    const mainEl = document.querySelector('main, article, [role="main"]');
-    const h1     = mainEl ? mainEl.querySelector('h1') : document.querySelector('h1');
-    if (h1) h1.insertAdjacentElement('afterend', host);
+    const anchor = window.NZValuatorAdapter.findPanelAnchor();
+    if (anchor) anchor.insertAdjacentElement('afterend', host);
     // else leave at body.prepend position
   }
 
@@ -489,7 +327,7 @@
 
   function doPoll() {
     pollTimer = null;
-    const address = tryExtract();
+    const address = window.NZValuatorAdapter.tryExtract();
     if (address) {
       relocatePanel();
       requestValuations(address);
@@ -504,12 +342,8 @@
   }
 
   // ─── SPA navigation ───────────────────────────────────────────────────────
-  // TradeMe uses Angular's pushState router.  Patch history.pushState /
+  // Next.js and Angular both use pushState routing.  Patch history.pushState /
   // replaceState and listen for popstate so we restart on every navigation.
-
-  function isListingPage() {
-    return location.pathname.includes('/listing/');
-  }
 
   let lastUrl = location.href;
 
@@ -523,7 +357,7 @@
     document.getElementById('nz-valuator-host')?.remove();
     currentShadow = null;
 
-    if (!isListingPage()) return;
+    if (!window.NZValuatorAdapter.isListingPage()) return;
 
     // Start fresh — inject panel with loading state, then re-poll.
     currentShadow = injectPanel();
@@ -544,10 +378,10 @@
 
   // ─── Bootstrap ────────────────────────────────────────────────────────────
   // Show the panel immediately in loading state so the user knows the
-  // extension is active, even before Angular has rendered the listing data.
+  // extension is active, even before the page has rendered listing data.
   // Only activate on individual listing pages, not search/browse pages.
 
-  if (isListingPage()) {
+  if (window.NZValuatorAdapter.isListingPage()) {
     currentShadow = injectPanel();
     startPolling();
   }

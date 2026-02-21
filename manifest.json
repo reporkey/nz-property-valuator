@@ -21,14 +21,28 @@
   "web_accessible_resources": [
     {
       "resources": ["panel.css"],
-      "matches": ["https://www.trademe.co.nz/*"]
+      "matches": [
+        "https://www.trademe.co.nz/*",
+        "https://www.oneroof.co.nz/*",
+        "https://www.realestate.co.nz/*"
+      ]
     }
   ],
 
   "content_scripts": [
     {
       "matches": ["https://www.trademe.co.nz/a/*"],
-      "js": ["content.js"],
+      "js": ["sites/trademe.js", "content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://www.oneroof.co.nz/property/*"],
+      "js": ["sites/oneroof.js", "content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://www.realestate.co.nz/residential/*"],
+      "js": ["sites/realestate.js", "content.js"],
       "run_at": "document_idle"
     }
   ],
