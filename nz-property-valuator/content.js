@@ -160,17 +160,16 @@
   // the given source.  Used when a source returns "Not found" so we can still
   // show a useful fallback link.
 
-  function buildSearchUrl(sourceName, address) {
-    const q = encodeURIComponent(address.fullAddress ?? address.streetAddress ?? '');
+  function buildSearchUrl(sourceName) {
     switch (sourceName) {
       case 'OneRoof':
         return 'https://www.oneroof.co.nz/estimate/map/region_all-new-zealand-1';
       case 'homes.co.nz':
         return 'https://homes.co.nz/';
       case 'PropertyValue':
-        return `https://www.propertyvalue.co.nz/?q=${q}`;
+        return 'https://www.propertyvalue.co.nz/';
       case 'RealEstate.co.nz':
-        return `https://www.realestate.co.nz/residential/sale/?search_location=${q}`;
+        return 'https://www.realestate.co.nz/residential/sale/';
       default:
         return null;
     }
@@ -359,7 +358,7 @@
       estimateEl.className   = 'nzvp-estimate nzvp-not-found';
       estimateEl.textContent = result.disabled ? 'No estimate' : 'Not found';
       if (!result.disabled && address) {
-        const sUrl = buildSearchUrl(sourceName, address);
+        const sUrl = buildSearchUrl(sourceName);
         if (sUrl) {
           linkEl.href        = sUrl;
           linkEl.textContent = `Search on ${sourceName} \u2192`;
