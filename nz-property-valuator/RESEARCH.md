@@ -314,3 +314,113 @@ https://www.propertyvalue.co.nz/otago/queenstown-lakes-district/jacks-point-9371
 > - The `/api/public/clapi/properties/<id>` endpoint returns the same data as
 >   `window.REDUX_DATA.PropertyDetails` in the SSR HTML — both approaches are valid.
 
+---
+
+## homes.co.nz
+
+### Base URL
+
+```
+https://homes.co.nz
+https://gateway.homes.co.nz   (API gateway — requires Origin/Referer spoofing)
+```
+
+### Known API Endpoints
+
+```
+# Address search — returns unit-level records only
+GET https://gateway.homes.co.nz/address/search?Address=<query>
+Headers: Origin: https://homes.co.nz, Referer: https://homes.co.nz/
+
+# Property card (estimate + metadata) — only works with unit UUIDs
+GET https://gateway.homes.co.nz/properties?property_ids=<uuid>
+# → { cards: [ { id, url, property_details: { display_estimated_lower_value_short,
+#              display_estimated_upper_value_short, display_address, unit_identifier,
+#              street_number, street, suburb, city, ... } } ] }
+# NOTE: building UUIDs return cards: [] — only unit UUIDs work.
+
+# Estimate history — building-level estimate (authenticated / unavailable for apartments)
+GET https://gateway.homes.co.nz/estimate/history/?month_limit=36
+# Returns 503 for apartment buildings; may work for stand-alone houses (untested)
+
+# Tracking — reveals the property UUID for the current page (building or unit)
+POST https://gateway.homes.co.nz/track/<uuid>
+```
+
+### Property Page URL Pattern
+
+```
+# Unit page:
+https://homes.co.nz/address/<city>/<suburb>/<unit>-<street-slug>/<shortId>
+# Example: https://homes.co.nz/address/auckland/eden-terrace/4f-20-charlotte-street/Zo85p
+
+# Building page (apartment block):
+https://homes.co.nz/address/<city>/<suburb>/<street-slug>/<shortId>
+# Example: https://homes.co.nz/address/auckland/eden-terrace/20-charlotte-street/M8qRVe
+# The shortId is mandatory — the URL without it returns 200 (bare CSR shell, no __NEXT_DATA__)
+# but no redirect to the full URL at the HTTP level.
+```
+
+### Apartment Building Research (20 Charlotte Street, Eden Terrace)
+
+```
+# ── Estimate availability ───────────────────────────────────────────────────
+# CONFIRMED: homes.co.nz does NOT provide building-level estimates for apartments.
+#
+# gateway address search → returns ONLY unit records (all Type 4 with UnitIdentifier set).
+#   Returns 14 units for "20 Charlotte Street, Eden Terrace" — no building record,
+#   regardless of query length, comma format, or limit param.
+#
+# Building page /M8qRVe:
+#   - estimate/history/?month_limit=36 → 503 (no estimate model for the building)
+#   - /properties?property_ids=<building-uuid> → cards: [] (building UUIDs not valid here)
+#   - HomesEstimate tab on page is empty
+#
+# Unit page /Zo85p (unit 4F):
+#   - /properties?property_ids=dcd2980a-eadd-468b-a5da-a45dc0d293e8 → ✅ returns card
+#   - display_estimated_lower_value_short: "390K"
+#   - display_estimated_upper_value_short: "440K"
+#   - display_address: "4F/20 Charlotte Street, Eden Terrace, Auckland"
+#
+# Unit card fields: id, item_id, property_id (all same UUID), url (unit URL with shortId),
+#   property_details.unit_identifier, street_number, street, suburb, city,
+#
+# ── Building URL discoverability ────────────────────────────────────────────
+# CONFIRMED: the building page URL is NOT discoverable via the public API from address alone.
+#
+# /property?url=<slug> endpoint:
+#   - Resolves a full slug+shortId to a property card.
+#   - /property?url=/auckland/eden-terrace/20-charlotte-street/M8qRVe → ✅ card (id: 4381544f)
+#   - /property?url=/auckland/eden-terrace/20-charlotte-street (no shortId) → 404
+#   - /property?url=/auckland/eden-terrace/20-charlotte-street/<unit-shortId> → "Property not found"
+#     (shortIds are per-property, not per-slug — cannot reuse unit shortId for building)
+#
+# address/search result fields: Type, Score, Title, Lat, Long, DeliveryPointID (always 0),
+#   UnitIdentifier, StreetNumber, StreetAlpha, City, Suburb, Street, StreetName, StreetType,
+#   SuburbID, CityID, PropertyID (UUID) — NO url/shortId field.
+#
+# Unit property_details fields: no parent_url, building_url, parent_id, or building_id.
+#
+# INDIRECT PATH (gets you to building slug but not shortId):
+#   1. address/search → unit UUID
+#   2. /properties?property_ids=<uuid> → card.url (e.g. "/auckland/eden-terrace/4f-20.../Zo85p")
+#   3. Strip unit prefix from slug → building slug "/auckland/eden-terrace/20-charlotte-street"
+#   4. DEAD END: no API returns the building shortId; /property?url=<slug> needs it.
+#
+# CONCLUSION: building shortId is an opaque DB identifier with no derivation path from
+#   address data. "No estimate found" for bare apartment queries is the correct behaviour.
+#   display_estimated_{lower,upper,}_value_short, capital_value, display_capital_value_short
+#
+# CONCLUSION: For bare apartment-building address queries (no unit number),
+#   homes.co.nz has no estimate to return. Strict Rule 2 (reject unit candidates when
+#   query has no unit) is the correct behaviour — returning "No estimate found" is honest.
+#   No building-level lookup path exists via the public API.
+```
+
+### Anti-Scraping Measures
+
+- **CORS**: All gateway requests must include `Origin: https://homes.co.nz` and `Referer: https://homes.co.nz/` headers; otherwise CORS error.
+- **No authentication required** for address search or `/properties` card endpoint.
+- **CSR pages**: homes.co.nz property pages are client-side rendered — no `__NEXT_DATA__` and no SSR payload in the initial HTML.
+- **Building page URL**: requires `shortId` (e.g. `M8qRVe`) — cannot be derived from address alone via any known public API endpoint.
+
