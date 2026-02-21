@@ -23,9 +23,10 @@
   const SOURCES = ['OneRoof', 'homes.co.nz', 'PropertyValue', 'RealEstate.co.nz'];
 
   // ─── Module state ─────────────────────────────────────────────────────────
-  let currentShadow = null;   // shadow root of the active panel
-  let pollTimer     = null;   // setTimeout handle for the active poll cycle
-  let pollStart     = 0;      // Date.now() when the current poll cycle began
+  let currentShadow  = null;   // shadow root of the active panel
+  let currentAddress = null;   // last address passed to requestValuations
+  let pollTimer      = null;   // setTimeout handle for the active poll cycle
+  let pollStart      = 0;      // Date.now() when the current poll cycle began
 
   // ─── Strategy 1: JSON-LD ──────────────────────────────────────────────────
   // TradeMe injects a <script type="application/ld+json"> with:
@@ -152,6 +153,27 @@
     const address = normalize(raw);
     console.log(LOG, `Address extracted via ${source}:`, address);
     return address;
+  }
+
+  // ─── Search URL builder ───────────────────────────────────────────────────
+  // Returns a URL the user can visit to manually search for the property on
+  // the given source.  Used when a source returns "Not found" so we can still
+  // show a useful fallback link.
+
+  function buildSearchUrl(sourceName, address) {
+    const q = encodeURIComponent(address.fullAddress ?? address.streetAddress ?? '');
+    switch (sourceName) {
+      case 'OneRoof':
+        return 'https://www.oneroof.co.nz/estimate/map/region_all-new-zealand-1';
+      case 'homes.co.nz':
+        return 'https://homes.co.nz/';
+      case 'PropertyValue':
+        return `https://www.propertyvalue.co.nz/?q=${q}`;
+      case 'RealEstate.co.nz':
+        return `https://www.realestate.co.nz/residential/sale/?search_location=${q}`;
+      default:
+        return null;
+    }
   }
 
   // ─── Panel HTML helpers ───────────────────────────────────────────────────
@@ -310,7 +332,7 @@
   // result.estimate → SUCCESS (green)
   // result.error matches /not found|not available/  → NOT_FOUND (grey)
   // result.error (other) → ERROR (orange)
-  function setCardState(shadow, sourceName, result) {
+  function setCardState(shadow, sourceName, result, address = null) {
     const card = shadow.getElementById(`nzvp-card-${sourceName}`);
     if (!card) return;
 
@@ -326,22 +348,36 @@
     }
 
     if (result.estimate) {
-      estimateEl.className  = 'nzvp-estimate nzvp-success';
+      estimateEl.className   = 'nzvp-estimate nzvp-success';
       estimateEl.textContent = result.estimate;
-      if (result.url) { linkEl.href = result.url; linkEl.hidden = false; }
+      if (result.url) {
+        linkEl.href        = result.url;
+        linkEl.textContent = `View on ${sourceName} \u2192`;
+        linkEl.hidden      = false;
+      } else { linkEl.hidden = true; }
     } else if (result.disabled || !result.error || /address not found/i.test(result.error)) {
-      estimateEl.className  = 'nzvp-estimate nzvp-not-found';
+      estimateEl.className   = 'nzvp-estimate nzvp-not-found';
       estimateEl.textContent = result.disabled ? 'No estimate' : 'Not found';
-      linkEl.hidden = true;
+      if (!result.disabled && address) {
+        const sUrl = buildSearchUrl(sourceName, address);
+        if (sUrl) {
+          linkEl.href        = sUrl;
+          linkEl.textContent = `Search on ${sourceName} \u2192`;
+          linkEl.hidden      = false;
+        } else { linkEl.hidden = true; }
+      } else { linkEl.hidden = true; }
     } else if (/no estimate|not available/i.test(result.error)) {
-      estimateEl.className  = 'nzvp-estimate nzvp-no-estimate';
+      estimateEl.className   = 'nzvp-estimate nzvp-no-estimate';
       estimateEl.textContent = 'No estimate';
-      if (result.url) { linkEl.href = result.url; linkEl.hidden = false; }
-      else { linkEl.hidden = true; }
+      if (result.url) {
+        linkEl.href        = result.url;
+        linkEl.textContent = `View on ${sourceName} \u2192`;
+        linkEl.hidden      = false;
+      } else { linkEl.hidden = true; }
     } else {
-      estimateEl.className  = 'nzvp-estimate nzvp-error-state';
+      estimateEl.className   = 'nzvp-estimate nzvp-error-state';
       estimateEl.textContent = 'Failed to load';
-      linkEl.hidden = true;
+      linkEl.hidden          = true;
     }
   }
 
@@ -352,7 +388,7 @@
     shadow.querySelector('.nzvp-all-failed')?.remove();
 
     for (const result of results) {
-      if (SOURCES.includes(result.source)) setCardState(shadow, result.source, result);
+      if (SOURCES.includes(result.source)) setCardState(shadow, result.source, result, address);
     }
 
     // If every displayed source is in the error state, show the all-failed banner.
@@ -378,7 +414,7 @@
       retryBtn.className   = 'nzvp-retry';
       retryBtn.textContent = 'Retry';
       retryBtn.addEventListener('click', () => {
-        setCardState(shadow, sourceName, null);
+        setCardState(shadow, sourceName, null, address);
         requestValuations(address);
       });
       card.appendChild(retryBtn);
@@ -393,10 +429,11 @@
     if (message.type !== 'VALUATION_UPDATE') return;
     if (!currentShadow) return;
     const { result } = message;
-    if (SOURCES.includes(result.source)) setCardState(currentShadow, result.source, result);
+    if (SOURCES.includes(result.source)) setCardState(currentShadow, result.source, result, currentAddress);
   });
 
   function requestValuations(address) {
+    currentAddress = address;
     chrome.runtime.sendMessage(
       { type: 'FETCH_VALUATIONS', address },
       response => {
