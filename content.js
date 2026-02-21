@@ -493,6 +493,10 @@
   // TradeMe uses Angular's pushState router.  Patch history.pushState /
   // replaceState and listen for popstate so we restart on every navigation.
 
+  function isListingPage() {
+    return location.pathname.includes('/listing/');
+  }
+
   let lastUrl = location.href;
 
   function handleNavigation() {
@@ -501,9 +505,11 @@
 
     console.log(LOG, 'SPA navigation detected, restarting:', location.href);
 
-    // Tear down the old panel.
+    // Tear down the old panel regardless — we may have navigated away from a listing.
     document.getElementById('nz-valuator-host')?.remove();
     currentShadow = null;
+
+    if (!isListingPage()) return;
 
     // Start fresh — inject panel with loading state, then re-poll.
     currentShadow = injectPanel();
@@ -525,8 +531,11 @@
   // ─── Bootstrap ────────────────────────────────────────────────────────────
   // Show the panel immediately in loading state so the user knows the
   // extension is active, even before Angular has rendered the listing data.
+  // Only activate on individual listing pages, not search/browse pages.
 
-  currentShadow = injectPanel();
-  startPolling();
+  if (isListingPage()) {
+    currentShadow = injectPanel();
+    startPolling();
+  }
 
 })();
