@@ -90,7 +90,6 @@
       const jsonLd = extractFromJsonLd();
       if (jsonLd && jsonLd.streetAddress) {
         const address = { ...normalize(jsonLd), oneRoofUrl: location.href };
-        console.log(LOG, 'OneRoof address from JSON-LD:', address);
         return address;
       }
 
@@ -98,7 +97,6 @@
       const fromUrl = extractFromUrl();
       if (fromUrl) {
         const address = { ...normalize(fromUrl), oneRoofUrl: location.href };
-        console.log(LOG, 'OneRoof address from URL slug:', address);
         return address;
       }
 

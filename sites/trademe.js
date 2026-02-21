@@ -128,7 +128,6 @@
       // Override suburb with the URL slug — it's usually the true suburb on TradeMe.
       const urlSuburb = suburbFromUrl();
       if (urlSuburb && urlSuburb !== raw.suburb) {
-        console.log(LOG, `Suburb corrected from URL: "${raw.suburb}" → "${urlSuburb}"`);
         raw = { ...raw, suburb: urlSuburb };
       }
 
@@ -139,13 +138,11 @@
       if (listingIdx >= 2 && urlParts[listingIdx - 1] === urlParts[listingIdx - 2]) {
         const domRaw = extractFromDom();
         if (domRaw?.suburb && domRaw.suburb !== raw.suburb) {
-          console.log(LOG, `Suburb refined from DOM (no URL suburb): "${raw.suburb}" → "${domRaw.suburb}"`);
           raw = { ...raw, suburb: domRaw.suburb };
         }
       }
 
       const address = normalize(raw);
-      console.log(LOG, `Address extracted via ${source}:`, address);
       return address;
     },
 

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "NZ Property Valuator",
-  "version": "0.1.0",
-  "description": "Overlay property valuation data on NZ real estate listing pages.",
+  "version": "1.0.0",
+  "description": "See instant property valuations from OneRoof, homes.co.nz, PropertyValue & RealEstate.co.nz while browsing TradeMe listings.",
 
   "permissions": ["activeTab", "storage", "tabs"],
 

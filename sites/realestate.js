@@ -78,7 +78,6 @@
       const jsonLd = extractFromJsonLd();
       if (jsonLd) {
         const address = normalize(jsonLd);
-        console.log(LOG, 'RealEstate address from JSON-LD:', address);
         return address;
       }
 
@@ -86,7 +85,6 @@
       const dom = extractFromDom();
       if (dom) {
         const address = normalize(dom);
-        console.log(LOG, 'RealEstate address from DOM:', address);
         return address;
       }
 

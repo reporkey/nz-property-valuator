@@ -760,7 +760,6 @@ function runFetchers(address, sources, tabId, sendResponse) {
 
     setCached(address.fullAddress, results);
     recordFetchStatus(results); // fire-and-forget
-    console.log('[NZ-Valuator] Valuations fetched for:', address.fullAddress, results);
     sendResponse({ ok: true, results, fromCache: false });
   });
 }
@@ -769,7 +768,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // ── Clear cache ───────────────────────────────────────────────────────────
   if (message.type === 'CLEAR_CACHE') {
     cache.clear();
-    console.log('[NZ-Valuator] Cache cleared');
     sendResponse({ ok: true });
     return false;
   }
@@ -783,7 +781,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Return cached results immediately if still fresh.
   const cached = getCached(cacheKey);
   if (cached) {
-    console.log('[NZ-Valuator] Cache hit:', cacheKey);
     sendResponse({ ok: true, results: cached, fromCache: true });
     return false;
   }

@@ -300,15 +300,13 @@
       { type: 'FETCH_VALUATIONS', address },
       response => {
         if (chrome.runtime.lastError) {
-          console.log(LOG, 'Messaging error:', chrome.runtime.lastError.message);
+          console.error(LOG, 'Messaging error:', chrome.runtime.lastError.message);
           return;
         }
         if (!response?.ok) {
-          console.log(LOG, 'Background returned an error response:', response);
+          console.error(LOG, 'Background returned an error response:', response);
           return;
         }
-        const tag = response.fromCache ? '(cached)' : '(live)';
-        console.log(LOG, `Valuations received ${tag}:`, response.results);
         if (currentShadow) applyResults(currentShadow, response.results, address);
       }
     );
@@ -335,7 +333,7 @@
       return;
     }
     if (Date.now() - pollStart >= TIMEOUT_MS) {
-      console.log(LOG, 'Address extraction timed out — showing manual input');
+      console.warn(LOG, 'Address extraction timed out — showing manual input');
       showNoAddressState(currentShadow);
       return;
     }
@@ -351,8 +349,6 @@
   function handleNavigation() {
     if (location.href === lastUrl) return; // replaceState with the same URL
     lastUrl = location.href;
-
-    console.log(LOG, 'SPA navigation detected, restarting:', location.href);
 
     // Tear down the old panel and observer — we may have navigated away.
     stopPanelObserver();
@@ -385,7 +381,6 @@
       if (document.getElementById('nz-valuator-host')) return; // still in DOM
       if (!window.NZValuatorAdapter.isListingPage()) { stopPanelObserver(); return; }
 
-      console.log(LOG, 'Panel removed by framework — re-injecting');
       currentShadow = injectPanel();
 
       if (currentAddress) {
