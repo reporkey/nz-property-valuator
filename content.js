@@ -527,7 +527,6 @@
   // extension is active, even before Angular has rendered the listing data.
 
   currentShadow = injectPanel();
-  setSubtitle(currentShadow, 'Detecting address…');
   startPolling();
 
 })();
