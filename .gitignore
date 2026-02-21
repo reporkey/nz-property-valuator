@@ -1,0 +1,8 @@
+# Claude Code session files
+.claude/
+
+# Test files (outside extension directory)
+addressMatcher.test.js
+
+# macOS
+.DS_Store
