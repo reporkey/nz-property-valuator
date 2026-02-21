@@ -352,6 +352,18 @@ async function fetchHomes(address) {
     return matches[0];
   }
 
+  // Construct a homes.co.nz map URL from a search result when no card URL is
+  // available (e.g. new builds where PropertyID is empty).
+  // Pattern: /map/{city-slug}/{suburb-slug}/{street-slug}/{house-number}
+  function homesMapUrl(r) {
+    const sl = s => (s || '').toLowerCase().replace(/\s+/g, '-');
+    const city = sl(r.City), suburb = sl(r.Suburb), street = sl(r.Street);
+    const num  = r.StreetNumber;
+    return (city && suburb && street && num)
+      ? `https://homes.co.nz/map/${city}/${suburb}/${street}/${num}`
+      : null;
+  }
+
   // Query cascade: fullAddress → street+suburb → street+city → street alone.
   // Each tier uses a progressively looser qParsed so that suburb-name mismatches
   // between TradeMe and homes.co.nz (e.g. "Coatesville" vs "Lucas Heights") are
@@ -386,6 +398,14 @@ async function fetchHomes(address) {
     }
     if (!exact) continue;
 
+    // New-build / address-only record: PropertyID is empty, so no card exists.
+    // Construct the map URL from the search result fields and skip the card fetch.
+    if (!exact.PropertyID) {
+      lastError = 'No estimate available on homes.co.nz';
+      lastUrl   = homesMapUrl(exact);
+      continue;
+    }
+
     // ── Card ─────────────────────────────────────────────────────────────
     let cardData;
     try {
@@ -406,12 +426,12 @@ async function fetchHomes(address) {
     }
 
     const card = (cardData.cards ?? [])[0];
-    if (!card) { lastError = 'No estimate available on homes.co.nz'; continue; }
+    if (!card) { lastError = 'No estimate available on homes.co.nz'; lastUrl = homesMapUrl(exact); continue; }
 
     const pd      = card.property_details ?? {};
     const lo      = pd.display_estimated_lower_value_short;
     const hi      = pd.display_estimated_upper_value_short;
-    const pageUrl = card.url ? 'https://homes.co.nz/address' + card.url : null;
+    const pageUrl = card.url ? 'https://homes.co.nz/address' + card.url : homesMapUrl(exact);
 
     if (!lo || !hi) { lastError = 'No estimate available on homes.co.nz'; lastUrl = pageUrl; continue; }
 
