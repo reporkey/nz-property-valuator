@@ -324,13 +324,7 @@ async function fetchHomes(address) {
   //   3. streetAddress only — widest net; locality check (suburb OR city in
   //                           title) to avoid cross-city false positives.
 
-  // Three qParsed variants — progressively looser locality matching per tier:
-  //   qParsed:         suburb+city gate (fullAddress and street+suburb queries)
-  //   qParsedCityOnly: city gate only   (street+city query — handles suburb-name mismatches)
-  //   qParsedStreet:   no locality gate (street-only query — widest net)
-  const qParsed         = parseAddress(address.streetAddress, address.suburb, address.city);
-  const qParsedCityOnly = parseAddress(address.streetAddress, null, address.city);
-  const qParsedStreet   = parseAddress(address.streetAddress);
+  const qParsed = parseAddress(address.streetAddress, address.suburb, address.city);
 
   async function homesSearch(query) {
     const resp = await fetchWithBackoff(
@@ -341,11 +335,11 @@ async function fetchHomes(address) {
     return (await resp.json()).Results ?? [];
   }
 
-  function findExact(results, qp) {
-    const matches = results.filter(r => matchAddress(qp, parseAddress(r.Title ?? '')).match);
+  function findExact(results) {
+    const matches = results.filter(r => matchAddress(qParsed, parseAddress(r.Title ?? '')).match);
     if (!matches.length) return null;
     // Prefer building-level record (no unit) when query has no unit.
-    if (qp.unitNum === null) {
+    if (qParsed.unitNum === null) {
       const noUnit = matches.find(r => parseAddress(r.Title ?? '').unitNum === null);
       if (noUnit) return noUnit;
     }
@@ -353,28 +347,25 @@ async function fetchHomes(address) {
   }
 
   // Query cascade: fullAddress → street+suburb → street+city → street alone.
-  // Each tier uses a progressively looser qParsed so that suburb-name mismatches
-  // between TradeMe and homes.co.nz (e.g. "Coatesville" vs "Lucas Heights") are
-  // resolved by the time the street+city or street-only tier runs.
+  // street+suburb covers cases where the building record surfaces under the
+  // specific suburb name (e.g. apartments); street+city covers suburb-name
+  // mismatches (e.g. Palmerston North / Terrace End); street-only is the
+  // widest net but requires a locality check to reject cross-city results.
   const streetSuburb = [address.streetAddress, address.suburb].filter(Boolean).join(', ');
   const streetCity   = [address.streetAddress, address.city].filter(Boolean).join(', ');
-
-  // Pair each query string with the appropriate matcher for that tier.
-  const tiers = [
-    { q: address.fullAddress,   qp: qParsed },
-    { q: streetSuburb,          qp: qParsed },
-    { q: streetCity,            qp: qParsedCityOnly },
-    { q: address.streetAddress, qp: qParsedStreet },
-  ].filter((t, i, arr) => t.q && arr.findIndex(x => x.q === t.q) === i); // dedup
+  const queryList    = [address.fullAddress, streetSuburb, streetCity, address.streetAddress]
+    .filter((q, i, arr) => q && arr.indexOf(q) === i); // dedup
 
   let lastError = 'Address not found on homes.co.nz';
   let lastUrl   = null;
 
-  for (const { q, qp } of tiers) {
+  for (let qi = 0; qi < queryList.length; qi++) {
+    const q            = queryList[qi];
+    const isStreetOnly = qi === queryList.length - 1;
     // ── Search ──────────────────────────────────────────────────────────────
     let exact;
     try {
-      exact = findExact(await homesSearch(q), qp);
+      exact = findExact(await homesSearch(q));
     } catch (err) {
       return {
         source:     'homes.co.nz',
