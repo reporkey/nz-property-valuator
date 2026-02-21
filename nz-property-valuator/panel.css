@@ -21,42 +21,12 @@
   container-name: nzvp;
 }
 
-/* ── Header ─────────────────────────────────────────────────────────────── */
-
-.nzvp-header {
-  padding: 13px 16px;
-  background: #f8f9fa;
-  border-bottom: 1px solid #e9ecef;
-}
-
-.nzvp-header-text {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.nzvp-title {
-  font-size: 15px;
-  font-weight: 600;
-  color: #212529;
-  letter-spacing: -0.01em;
-}
-
-.nzvp-subtitle {
-  font-size: 11px;
-  color: #adb5bd;
-  font-weight: 400;
-}
-
-.nzvp-subtitle[hidden] {
-  display: none;
-}
 
 
 /* ── Body ────────────────────────────────────────────────────────────────── */
 
 .nzvp-body {
-  padding: 14px 16px 16px;
+  padding: 12px 12px 14px;
 }
 
 

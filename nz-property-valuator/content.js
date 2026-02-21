@@ -224,12 +224,6 @@
     return `
       <link rel="stylesheet" href="${cssUrl}">
       <div class="nzvp-panel">
-        <header class="nzvp-header" id="nzvp-header">
-          <div class="nzvp-header-text">
-            <span class="nzvp-title">🏠 Property Valuations</span>
-            <span class="nzvp-subtitle" id="nzvp-subtitle">Detecting address…</span>
-          </div>
-        </header>
         <div class="nzvp-body" id="nzvp-body">
           <div class="nzvp-cards" id="nzvp-cards">
             ${SOURCES.map(buildCardHTML).join('')}
