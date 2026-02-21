@@ -32,6 +32,7 @@
   let currentAddress = null;   // last address passed to requestValuations
   let pollTimer      = null;   // setTimeout handle for the active poll cycle
   let pollStart      = 0;      // Date.now() when the current poll cycle began
+  let panelObserver  = null;   // MutationObserver watching for panel removal
 
   // ─── Search URL builder ───────────────────────────────────────────────────
   // Returns a URL the user can visit to manually search for the property on
@@ -353,14 +354,17 @@
 
     console.log(LOG, 'SPA navigation detected, restarting:', location.href);
 
-    // Tear down the old panel regardless — we may have navigated away from a listing.
+    // Tear down the old panel and observer — we may have navigated away.
+    stopPanelObserver();
     document.getElementById('nz-valuator-host')?.remove();
     currentShadow = null;
+    currentAddress = null;
 
     if (!window.NZValuatorAdapter.isListingPage()) return;
 
     // Start fresh — inject panel with loading state, then re-poll.
     currentShadow = injectPanel();
+    startPanelObserver();
     startPolling();
   }
 
@@ -370,10 +374,41 @@
   });
   window.addEventListener('popstate', handleNavigation);
 
+  // ─── Panel survival observer ───────────────────────────────────────────────
+  // Some SPA frameworks (e.g. Ember.js on realestate.co.nz) do a full DOM
+  // replacement after their initial render, wiping any element prepended to
+  // document.body.  Watch for the host being removed and re-inject it.
+
+  function startPanelObserver() {
+    if (panelObserver) return;
+    panelObserver = new MutationObserver(() => {
+      if (document.getElementById('nz-valuator-host')) return; // still in DOM
+      if (!window.NZValuatorAdapter.isListingPage()) { stopPanelObserver(); return; }
+
+      console.log(LOG, 'Panel removed by framework — re-injecting');
+      currentShadow = injectPanel();
+
+      if (currentAddress) {
+        // Results may be cached; request again (fast cache hit) and try to
+        // relocate once the framework has finished rendering the anchor element.
+        requestValuations(currentAddress);
+        setTimeout(relocatePanel, 500);
+      } else {
+        startPolling();
+      }
+    });
+    panelObserver.observe(document.documentElement, { childList: true, subtree: true });
+  }
+
+  function stopPanelObserver() {
+    if (panelObserver) { panelObserver.disconnect(); panelObserver = null; }
+  }
+
   // ─── Cleanup ──────────────────────────────────────────────────────────────
 
   window.addEventListener('beforeunload', () => {
     if (pollTimer !== null) { clearTimeout(pollTimer); pollTimer = null; }
+    stopPanelObserver();
   });
 
   // ─── Bootstrap ────────────────────────────────────────────────────────────
@@ -383,6 +418,7 @@
 
   if (window.NZValuatorAdapter.isListingPage()) {
     currentShadow = injectPanel();
+    startPanelObserver();
     startPolling();
   }
 
