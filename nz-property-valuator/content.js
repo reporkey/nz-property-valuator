@@ -329,10 +329,15 @@
       estimateEl.className  = 'nzvp-estimate nzvp-success';
       estimateEl.textContent = result.estimate;
       if (result.url) { linkEl.href = result.url; linkEl.hidden = false; }
-    } else if (!result.error || /not found|not available|no estimate/i.test(result.error)) {
+    } else if (result.disabled || !result.error || /address not found/i.test(result.error)) {
       estimateEl.className  = 'nzvp-estimate nzvp-not-found';
-      estimateEl.textContent = 'No estimate';
+      estimateEl.textContent = result.disabled ? 'No estimate' : 'Not found';
       linkEl.hidden = true;
+    } else if (/no estimate|not available/i.test(result.error)) {
+      estimateEl.className  = 'nzvp-estimate nzvp-no-estimate';
+      estimateEl.textContent = 'No estimate';
+      if (result.url) { linkEl.href = result.url; linkEl.hidden = false; }
+      else { linkEl.hidden = true; }
     } else {
       estimateEl.className  = 'nzvp-estimate nzvp-error-state';
       estimateEl.textContent = 'Failed to load';

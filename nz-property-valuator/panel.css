@@ -140,7 +140,8 @@
   color: #111111;
 }
 
-.nzvp-estimate.nzvp-not-found {
+.nzvp-estimate.nzvp-not-found,
+.nzvp-estimate.nzvp-no-estimate {
   color: #adb5bd;
   font-size: 14px;
   font-weight: 400;

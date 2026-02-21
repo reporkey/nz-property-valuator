@@ -357,6 +357,7 @@ async function fetchHomes(address) {
     .filter((q, i, arr) => q && arr.indexOf(q) === i); // dedup
 
   let lastError = 'Address not found on homes.co.nz';
+  let lastUrl   = null;
 
   for (let qi = 0; qi < queryList.length; qi++) {
     const q            = queryList[qi];
@@ -403,7 +404,7 @@ async function fetchHomes(address) {
     const hi      = pd.display_estimated_upper_value_short;
     const pageUrl = card.url ? 'https://homes.co.nz/address' + card.url : null;
 
-    if (!lo || !hi) { lastError = 'No estimate available on homes.co.nz'; continue; }
+    if (!lo || !hi) { lastError = 'No estimate available on homes.co.nz'; lastUrl = pageUrl; continue; }
 
     return {
       source:     'homes.co.nz',
@@ -414,7 +415,7 @@ async function fetchHomes(address) {
     };
   }
 
-  return { source: 'homes.co.nz', estimate: null, url: null, confidence: null, error: lastError };
+  return { source: 'homes.co.nz', estimate: null, url: lastUrl, confidence: null, error: lastError };
 }
 
 // ─── PropertyValue fetcher ───────────────────────────────────────────────
