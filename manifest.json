@@ -41,7 +41,7 @@
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://www.realestate.co.nz/residential/*"],
+      "matches": ["https://www.realestate.co.nz/*/residential/*"],
       "js": ["sites/realestate.js", "content.js"],
       "run_at": "document_idle"
     }
