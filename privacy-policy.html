@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Privacy Policy — NZ Property Valuator</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      max-width: 720px;
+      margin: 48px auto;
+      padding: 0 24px;
+      color: #222;
+      line-height: 1.7;
+    }
+    h1 { font-size: 1.8rem; margin-bottom: 0.25em; }
+    h2 { font-size: 1.2rem; margin-top: 2em; }
+    p, ul { margin: 0.75em 0; }
+    ul { padding-left: 1.5em; }
+    .meta { color: #666; font-size: 0.9rem; margin-bottom: 2em; }
+  </style>
+</head>
+<body>
+
+<h1>Privacy Policy</h1>
+<p class="meta">NZ Property Valuator &mdash; Last updated: 21 February 2026</p>
+
+<h2>What this extension does</h2>
+<p>
+  NZ Property Valuator is a Chrome browser extension that displays property valuation
+  estimates alongside TradeMe property listings. When you visit a supported listing page,
+  the extension extracts the property address from that page and looks it up on four
+  third-party NZ property data services: OneRoof, homes.co.nz, PropertyValue.co.nz,
+  and RealEstate.co.nz.
+</p>
+
+<h2>Data accessed</h2>
+<ul>
+  <li>
+    <strong>Property address strings only.</strong> The extension reads the street address,
+    suburb, and city from the TradeMe listing page you are currently viewing. This is the
+    only data accessed from your browser.
+  </li>
+  <li>
+    No personal information, browsing history, cookies, login credentials, or any other
+    user data is accessed or processed.
+  </li>
+</ul>
+
+<h2>How address lookups work</h2>
+<p>
+  Address queries are sent <strong>directly from your browser</strong> to the four
+  third-party services listed above. The extension acts as a thin client: it formats the
+  address and makes the same API requests that those services&rsquo; own websites make.
+  No address data passes through any server we control.
+</p>
+<p>
+  The privacy policies of those third-party services apply to the requests made to them:
+</p>
+<ul>
+  <li><a href="https://www.oneroof.co.nz/privacy">OneRoof Privacy Policy</a></li>
+  <li><a href="https://homes.co.nz/privacy">homes.co.nz Privacy Policy</a></li>
+  <li><a href="https://www.propertyvalue.co.nz/privacy-policy">PropertyValue.co.nz Privacy Policy</a></li>
+  <li><a href="https://www.realestate.co.nz/privacy">RealEstate.co.nz Privacy Policy</a></li>
+</ul>
+
+<h2>Caching</h2>
+<p>
+  Valuation results are cached <strong>in memory only</strong>, local to the browser
+  session, with a 30-minute expiry. Nothing is written to disk, synced to a server,
+  or persisted beyond the current browser session. The cache is automatically cleared
+  when the extension&rsquo;s service worker is terminated (e.g., after the browser is
+  closed or the extension is reloaded).
+</p>
+
+<h2>chrome.storage usage</h2>
+<p>
+  The extension uses <code>chrome.storage.sync</code> to remember which valuation
+  sources you have enabled or disabled in the popup. This preference data is synced
+  by Chrome across your signed-in devices if you have Chrome sync enabled; it contains
+  no personal information, only boolean toggles for each source.
+</p>
+<p>
+  <code>chrome.storage.local</code> is used to cache the most recently fetched
+  estimate and timestamp for each source, so the popup can display a summary without
+  re-fetching. This data is local to your device.
+</p>
+
+<h2>Analytics and tracking</h2>
+<p>
+  This extension contains <strong>no analytics, no telemetry, no crash reporting, and
+  no tracking of any kind.</strong> We do not know how often the extension is used,
+  which properties are viewed, or who uses it.
+</p>
+
+<h2>Permissions</h2>
+<p>The extension requests the following Chrome permissions:</p>
+<ul>
+  <li><strong>activeTab</strong> — to read the address from the listing page you are viewing.</li>
+  <li><strong>storage</strong> — to save your source toggle preferences across sessions.</li>
+  <li><strong>host_permissions</strong> for TradeMe, OneRoof, homes.co.nz, PropertyValue, and RealEstate — to make the valuation API requests on your behalf.</li>
+</ul>
+<p>No other permissions are requested.</p>
+
+<h2>Contact</h2>
+<p>
+  This extension is open source. Source code and issue tracker:
+  <a href="https://github.com/reporkey/nz-property-valuator">github.com/reporkey/nz-property-valuator</a>.
+</p>
+
+</body>
+</html>

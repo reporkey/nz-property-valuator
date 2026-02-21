@@ -4,7 +4,9 @@
   "version": "1.0.0",
   "description": "See instant property valuations from OneRoof, homes.co.nz, PropertyValue & RealEstate.co.nz while browsing TradeMe listings.",
 
-  "permissions": ["activeTab", "storage", "tabs"],
+  "permissions": ["activeTab", "storage"],
+
+  "homepage_url": "https://github.com/reporkey/nz-property-valuator",
 
   "host_permissions": [
     "https://www.trademe.co.nz/*",
@@ -56,6 +58,7 @@
     "default_title": "NZ Property Valuator",
     "default_icon": {
       "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
       "48": "icons/icon48.png",
       "128": "icons/icon128.png"
     }
@@ -63,6 +66,7 @@
 
   "icons": {
     "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   }

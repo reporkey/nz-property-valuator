@@ -1,0 +1,34 @@
+NZ Property Valuator
+
+See instant property valuations from four NZ data sources — OneRoof, homes.co.nz, PropertyValue.co.nz, and RealEstate.co.nz — without leaving your TradeMe listing.
+
+HOW IT WORKS
+
+When you open a TradeMe property listing, a small panel appears alongside the page showing the current estimated value (or value range) from each supported source. Results load in seconds and update incrementally as each source responds.
+
+SOURCES
+
+• OneRoof — New Zealand's largest property data platform, backed by NZME.
+• homes.co.nz — Automated valuation model with historical sales data.
+• PropertyValue.co.nz — Independent AVM with confidence ratings.
+• RealEstate.co.nz — Estimate with low/high range from NZ's leading real-estate portal.
+
+FEATURES
+
+• Instant side-by-side valuations from four sources on every supported listing
+• Confidence indicators (high / medium / low) where available
+• Direct links to each property's page on the source site
+• Toggle individual sources on or off from the popup
+• Keyboard-friendly, accessible panel built with Shadow DOM (no style conflicts)
+• Works across SPA navigation — stays up to date as you browse between listings
+
+FREE & PRIVATE
+
+• Completely free, no account or sign-in required
+• No data collection, no analytics, no tracking of any kind
+• All lookups go directly from your browser to the source APIs — nothing passes through our servers
+• Open source: github.com/reporkey/nz-property-valuator
+
+REQUIREMENTS
+
+Works on TradeMe property listing pages (trademe.co.nz/a/*). Support for OneRoof and RealEstate.co.nz property pages is also included.
