@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Chrome Extension (Manifest V3) that enriches TradeMe property listings with valuation estimates from four NZ property data sources: **OneRoof**, **homes.co.nz**, **PropertyValue.co.nz**, and **RealEstate.co.nz**.
 
-All extension files live in `nz-property-valuator/`. Load it unpacked from `chrome://extensions` (enable Developer mode, then Load unpacked → select that folder). Navigate to any `https://www.trademe.co.nz/a/*` property listing to test.
+All extension files live in the repo root. Load it unpacked from `chrome://extensions` (enable Developer mode, then Load unpacked → select the repo root folder). Navigate to any `https://www.trademe.co.nz/a/*` property listing to test.
 
 **No build step.** Plain browser JavaScript — no npm, webpack, or transpilation. After editing any file, go to `chrome://extensions` and click the reload icon (↺) for the extension, then refresh the TradeMe page. Service worker changes take effect on reload; content script changes take effect on page refresh; popup changes take effect immediately on next open.
 

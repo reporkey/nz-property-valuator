@@ -283,16 +283,8 @@
 
   // ─── Panel state helpers ──────────────────────────────────────────────────
 
-  function setSubtitle(shadow, text) {
-    const sub = shadow.getElementById('nzvp-subtitle');
-    if (!sub) return;
-    if (text) { sub.textContent = text; sub.hidden = false; }
-    else      { sub.hidden = true; }
-  }
-
   // Replace the cards grid with a "could not detect" message + manual input.
   function showNoAddressState(shadow) {
-    setSubtitle(shadow, null);
     const cardsEl = shadow.getElementById('nzvp-cards');
     if (!cardsEl) return;
 
@@ -486,7 +478,6 @@
     const address = tryExtract();
     if (address) {
       relocatePanel();
-      setSubtitle(currentShadow, null);     // hide "Detecting address…"
       requestValuations(address);
       return;
     }
@@ -516,7 +507,6 @@
 
     // Start fresh — inject panel with loading state, then re-poll.
     currentShadow = injectPanel();
-    setSubtitle(currentShadow, 'Detecting address…');
     startPolling();
   }
 

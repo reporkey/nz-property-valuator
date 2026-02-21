@@ -11,20 +11,22 @@ When browsing a property listing on TradeMe, the extension injects a panel showi
 | Site | Role |
 |------|------|
 | trademe.co.nz | Primary listing surface (content script injected here) |
+| oneroof.co.nz | Valuation data source |
 | homes.co.nz | Valuation data source |
 | propertyvalue.co.nz | Valuation data source |
-| oneroof.co.nz | Valuation / market data source |
+| realestate.co.nz | Valuation data source |
 
 ## Project structure
 
 ```
 nz-property-valuator/
-├── manifest.json      # Extension manifest (MV3)
-├── content.js         # Content script — scrapes listing & renders panel
-├── background.js      # Service worker — fetches valuation data, manages state
-├── panel.css          # Styles for the injected valuation panel
-├── popup.html         # Browser-action popup UI
-├── popup.js           # Popup logic
+├── manifest.json        # Extension manifest (MV3)
+├── background.js        # Service worker — fetches valuation data, manages state
+├── content.js           # Content script — scrapes listing & renders panel
+├── addressMatcher.js    # Shared address parsing and matching utilities
+├── panel.css            # Styles for the injected valuation panel (Shadow DOM)
+├── popup.html           # Browser-action popup UI
+├── popup.js             # Popup logic
 ├── icons/
 │   ├── icon16.png
 │   ├── icon48.png
@@ -41,4 +43,4 @@ nz-property-valuator/
 
 ## Status
 
-Skeleton only — no logic implemented yet.
+Fully functional. All four valuation sources (OneRoof, homes.co.nz, PropertyValue, RealEstate.co.nz) are implemented and active.
