@@ -362,12 +362,15 @@ async function fetchHomes(address) {
   // available (e.g. new builds where PropertyID is empty).
   // Pattern: /map/{city-slug}/{suburb-slug}/{street-slug}/{house-number}
   function homesMapUrl(r) {
-    const sl = s => (s || '').toLowerCase().replace(/\s+/g, '-');
-    const city = sl(r.City), suburb = sl(r.Suburb), street = sl(r.Street);
-    const num  = r.StreetNumber;
-    return (city && suburb && street && num)
+    const sl  = s => (s || '').toLowerCase().replace(/\s+/g, '-');
+    const city   = sl(r.City);
+    const suburb = sl(r.Suburb);   // may be empty for standalone towns
+    const street = sl(r.Street);
+    const num    = String(r.StreetNumber || '') + (r.StreetAlpha || '').toLowerCase();
+    if (!city || !street || !num) return null;
+    return suburb
       ? `https://homes.co.nz/map/${city}/${suburb}/${street}/${num}`
-      : null;
+      : `https://homes.co.nz/map/${city}/${street}/${num}`;
   }
 
   // Query cascade: fullAddress → street+suburb → street+city → street alone.
