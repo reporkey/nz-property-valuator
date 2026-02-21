@@ -229,7 +229,6 @@
             <span class="nzvp-title">🏠 Property Valuations</span>
             <span class="nzvp-subtitle" id="nzvp-subtitle">Detecting address…</span>
           </div>
-          <button class="nzvp-toggle" aria-expanded="true" aria-label="Toggle panel">▾</button>
         </header>
         <div class="nzvp-body" id="nzvp-body">
           <div class="nzvp-cards" id="nzvp-cards">
@@ -253,16 +252,6 @@
     host.id      = 'nz-valuator-host';
     const shadow = host.attachShadow({ mode: 'open' });
     shadow.innerHTML = buildPanelHTML();
-
-    // Collapse / expand toggle
-    const header = shadow.getElementById('nzvp-header');
-    const toggle = shadow.querySelector('.nzvp-toggle');
-    const body   = shadow.getElementById('nzvp-body');
-    header.addEventListener('click', () => {
-      const collapsed = body.classList.toggle('nzvp-hidden');
-      toggle.classList.toggle('nzvp-collapsed', collapsed);
-      toggle.setAttribute('aria-expanded', String(!collapsed));
-    });
 
     document.body.prepend(host);
     return shadow;
