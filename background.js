@@ -186,65 +186,71 @@ function parseOrAvm(html) {
 //   "medium" — fuzzy / partial match
 
 async function fetchOneRoof(address) {
-  // ── Step 1: Resolve address to slug ───────────────────────────────────────
   const qParsed = parseAddress(address.streetAddress, address.suburb, address.city);
 
-  async function orSearch(key) {
-    const url = `${OR_BASE_URL}/v2.6/address/search?isMix=1` +
-      `&key=${encodeURIComponent(key)}&typeId=-100`;
-    const resp = await fetchWithBackoff(url, { headers: await orHeaders(url) });
-    if (!resp.ok) throw new Error(`OneRoof search request failed (HTTP ${resp.status})`);
-    const data = await resp.json();
-    return data.properties ?? [];
-  }
+  let pageUrl, confidence;
 
-  function findBest(properties) {
-    const ranked = properties
-      .map(p => ({ p, r: matchAddress(qParsed, parseAddress(p.pureLabel ?? '')) }))
-      .filter(x => x.r.match);
-    if (!ranked.length) return null;
-    // Prefer building-level (no unit) over unit fallbacks, then highest confidence.
-    const CONF = ['high', 'medium', 'low'];
-    ranked.sort((a, b) =>
-      (a.r.unitFallback ? 1 : 0) - (b.r.unitFallback ? 1 : 0) ||
-      CONF.indexOf(a.r.confidence) - CONF.indexOf(b.r.confidence)
-    );
-    return ranked[0].p;
-  }
-
-  // Fallback query cascade: fullAddress → street + suburb (drops city) → street alone.
-  // The city/region from TradeMe (e.g. "Canterbury") can be picked up as a street-name
-  // keyword by the OneRoof search API, returning completely unrelated results.
-  // Continuing past such false-positive result sets lets us reach a cleaner query.
-  // Locality check is applied only on the last (street-only) query.
-  const streetSuburb = [address.streetAddress, address.suburb].filter(Boolean).join(', ');
-  const queryList = [address.fullAddress, streetSuburb, address.streetAddress]
-    .filter((q, i, arr) => q && arr.indexOf(q) === i); // dedup
-
-  let best = null;
-  try {
-    for (let qi = 0; qi < queryList.length; qi++) {
-      best = findBest(await orSearch(queryList[qi]));
-      if (best) break;
+  if (address.oneRoofUrl) {
+    // ── Shortcut: already on an OneRoof property page — URL is known ──────────
+    pageUrl    = address.oneRoofUrl;
+    confidence = 'high';
+  } else {
+    // ── Step 1: Resolve address to slug via search API ────────────────────────
+    async function orSearch(key) {
+      const url = `${OR_BASE_URL}/v2.6/address/search?isMix=1` +
+        `&key=${encodeURIComponent(key)}&typeId=-100`;
+      const resp = await fetchWithBackoff(url, { headers: await orHeaders(url) });
+      if (!resp.ok) throw new Error(`OneRoof search request failed (HTTP ${resp.status})`);
+      const data = await resp.json();
+      return data.properties ?? [];
     }
-  } catch (err) {
-    return {
-      source:     'OneRoof',
-      estimate:   null,
-      url:        null,
-      confidence: null,
-      error:      /OneRoof/.test(err.message) ? err.message : 'OneRoof request failed',
-    };
-  }
 
-  if (!best) {
-    return { source: 'OneRoof', estimate: null, url: null, confidence: null,
-             error: 'Address not found on OneRoof' };
-  }
+    function findBest(properties) {
+      const ranked = properties
+        .map(p => ({ p, r: matchAddress(qParsed, parseAddress(p.pureLabel ?? '')) }))
+        .filter(x => x.r.match);
+      if (!ranked.length) return null;
+      // Prefer building-level (no unit) over unit fallbacks, then highest confidence.
+      const CONF = ['high', 'medium', 'low'];
+      ranked.sort((a, b) =>
+        (a.r.unitFallback ? 1 : 0) - (b.r.unitFallback ? 1 : 0) ||
+        CONF.indexOf(a.r.confidence) - CONF.indexOf(b.r.confidence)
+      );
+      return ranked[0].p;
+    }
 
-  const slug       = best.slug;   // "auckland/remuera/10-mahoe-avenue/qeHJ8"
-  const pageUrl    = `${OR_BASE_URL}/property/${slug}`;
-  const confidence = matchAddress(qParsed, parseAddress(best.pureLabel ?? '')).confidence ?? 'medium';
+    // Fallback query cascade: fullAddress → street + suburb (drops city) → street alone.
+    // The city/region from TradeMe (e.g. "Canterbury") can be picked up as a street-name
+    // keyword by the OneRoof search API, returning completely unrelated results.
+    // Continuing past such false-positive result sets lets us reach a cleaner query.
+    const streetSuburb = [address.streetAddress, address.suburb].filter(Boolean).join(', ');
+    const queryList = [address.fullAddress, streetSuburb, address.streetAddress]
+      .filter((q, i, arr) => q && arr.indexOf(q) === i); // dedup
+
+    let best = null;
+    try {
+      for (let qi = 0; qi < queryList.length; qi++) {
+        best = findBest(await orSearch(queryList[qi]));
+        if (best) break;
+      }
+    } catch (err) {
+      return {
+        source:     'OneRoof',
+        estimate:   null,
+        url:        null,
+        confidence: null,
+        error:      /OneRoof/.test(err.message) ? err.message : 'OneRoof request failed',
+      };
+    }
+
+    if (!best) {
+      return { source: 'OneRoof', estimate: null, url: null, confidence: null,
+               error: 'Address not found on OneRoof' };
+    }
+
+    pageUrl    = `${OR_BASE_URL}/property/${best.slug}`;
+    confidence = matchAddress(qParsed, parseAddress(best.pureLabel ?? '')).confidence ?? 'medium';
+  }
 
   // ── Step 2: Fetch property page and parse RSC AVM data ────────────────────
   let html;

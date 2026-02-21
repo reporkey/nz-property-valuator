@@ -89,7 +89,7 @@
       // Strategy 1: JSON-LD — richer locality data if present.
       const jsonLd = extractFromJsonLd();
       if (jsonLd && jsonLd.streetAddress) {
-        const address = normalize(jsonLd);
+        const address = { ...normalize(jsonLd), oneRoofUrl: location.href };
         console.log(LOG, 'OneRoof address from JSON-LD:', address);
         return address;
       }
@@ -97,7 +97,7 @@
       // Strategy 2: URL slug — always available, no rendering required.
       const fromUrl = extractFromUrl();
       if (fromUrl) {
-        const address = normalize(fromUrl);
+        const address = { ...normalize(fromUrl), oneRoofUrl: location.href };
         console.log(LOG, 'OneRoof address from URL slug:', address);
         return address;
       }
