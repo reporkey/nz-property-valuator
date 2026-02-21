@@ -696,7 +696,7 @@ async function fetchRealEstate(address) {
     // confidence-rating 1 = minimum (API has essentially no confidence) → suppress.
     // confidence-rating 2+ = show with appropriate label.
     const confMap    = { 5: 'high', 4: 'high', 3: 'medium', 2: 'low' };
-    const confidence = confMap[ev['confidence-rating']] ?? null;
+    const confidence = ev ? (confMap[ev['confidence-rating']] ?? null) : null;
 
     if (!ev || ev['value-low'] == null || ev['value-high'] == null || confidence === null) {
       return { source: 'RealEstate.co.nz', estimate: null, url: pageUrl, confidence: null,
