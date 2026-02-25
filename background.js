@@ -384,12 +384,14 @@ async function fetchHomes(address) {
   const streetSuburb = [address.streetAddress, address.suburb].filter(Boolean).join(', ');
   const streetCity   = [address.streetAddress, address.city].filter(Boolean).join(', ');
 
-  // Pair each query string with the appropriate matcher for that tier.
+  // homes.co.nz indexes apostrophised names with a space (e.g. "D' Amarres"),
+  // so replace apostrophes with spaces in query strings to match their index.
+  const homesQ = s => s?.replace(/[''`\u2018\u2019]/g, ' ').replace(/\s+/g, ' ').trim() ?? s;
   const tiers = [
-    { q: address.fullAddress,   qp: qParsed },
-    { q: streetSuburb,          qp: qParsed },
-    { q: streetCity,            qp: qParsedCityOnly },
-    { q: address.streetAddress, qp: qParsedStreet },
+    { q: homesQ(address.fullAddress),   qp: qParsed },
+    { q: homesQ(streetSuburb),          qp: qParsed },
+    { q: homesQ(streetCity),            qp: qParsedCityOnly },
+    { q: homesQ(address.streetAddress), qp: qParsedStreet },
   ].filter((t, i, arr) => t.q && arr.findIndex(x => x.q === t.q) === i); // dedup
 
   let lastError = 'Address not found on homes.co.nz';
@@ -492,10 +494,20 @@ async function fetchPropertyValue(address) {
   // PropertyValue's suggestions API returns 404 for some suburb+city
   // combinations (e.g. "Red Beach, Auckland") but succeeds when the city is
   // omitted.  Try progressively shorter queries until we get a 200 with hits.
+  // PropertyValue's autocomplete breaks on apostrophised names: "D'Amarres" and
+  // "D Amarres" both return 0 hits, but truncating before the apostrophe ("36 Rue D")
+  // succeeds.  Add the truncated form as a fallback query; the slug validation in
+  // step 2/3 guards against false positives.
+  const pvTruncApos = s => {
+    if (!s) return null;
+    const m = s.match(/^(.*?\S)[''`\u2018\u2019]/);
+    return m ? m[1].trim() : null;  // "36 Rue D'Amarres" → "36 Rue D"
+  };
   const pvSuggestQueries = [
     address.fullAddress,                                         // street + suburb + city
     [address.streetAddress, address.suburb].filter(Boolean).join(', '), // street + suburb
     address.streetAddress,                                       // street only
+    pvTruncApos(address.streetAddress),                          // truncated at apostrophe
   ].filter((q, i, arr) => q && arr.indexOf(q) === i);           // deduplicate
 
   let propertyId;
