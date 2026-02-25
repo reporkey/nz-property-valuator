@@ -125,8 +125,8 @@
     // ── Parse unit + house number from streetPart ─────────────────────────
     let unitNum = null, houseNum = null, streetBody = null;
 
-    // Pattern A: "1/42 Smith Street" or "1A/42B Smith St"
-    const patA = /^(\d+[a-z]?)\/(\d+[a-z]?)\s+(.+)/i.exec(streetPart);
+    // Pattern A: "1/42 Smith Street" or "1A/42B Smith St" (tolerates "1/ 42")
+    const patA = /^(\d+[a-z]?)\/\s*(\d+[a-z]?)\s+(.+)/i.exec(streetPart);
     if (patA) {
       unitNum    = patA[1].toLowerCase();
       houseNum   = patA[2].toLowerCase();

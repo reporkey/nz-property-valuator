@@ -576,7 +576,14 @@ async function fetchPropertyValue(address) {
   // Parse the slug as an address and compare components.
   if (pvPath) {
     const lastSlug = pvPath.split('/').filter(Boolean).pop() ?? '';
-    const slugStr  = lastSlug.replace(/-/g, ' ').replace(/\d{5,}\s*$/, '').trim();
+    let slugStr  = lastSlug.replace(/-/g, ' ').replace(/\d{5,}\s*$/, '').trim();
+    // PV slugs encode "502/1817A" as "502-1817a" → "502 1817a", losing the
+    // unit slash.  Re-insert it when the query has a unit number so parseAddress
+    // correctly identifies unit vs house.
+    if (qParsed.unitNum !== null) {
+      const um = slugStr.match(/^(\d+[a-z]?)\s+(\d+[a-z]?\s+.+)/i);
+      if (um) slugStr = um[1] + '/' + um[2];
+    }
     const cParsed  = parseAddress(slugStr);
     const unitMismatch  = qParsed.unitNum === null && cParsed.unitNum !== null;
     const houseMismatch = qParsed.houseNum && cParsed.houseNum && qParsed.houseNum !== cParsed.houseNum;
