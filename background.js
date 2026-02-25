@@ -50,7 +50,7 @@ const DEFAULT_SOURCE_SETTINGS = {
 };
 
 function disabledResult(source) {
-  return { source, estimate: null, url: null, confidence: null, error: null, disabled: true };
+  return { source, estimate: null, url: null, error: null, disabled: true };
 }
 
 // Persist the last fetch outcome for each displayed source so the popup can
@@ -200,12 +200,11 @@ function parseOrAvm(html) {
 async function fetchOneRoof(address) {
   const qParsed = parseAddress(address.streetAddress, address.suburb, address.city);
 
-  let pageUrl, confidence;
+  let pageUrl;
 
   if (address.oneRoofUrl) {
     // ── Shortcut: already on an OneRoof property page — URL is known ──────────
     pageUrl    = address.oneRoofUrl;
-    confidence = 'high';
   } else {
     // ── Step 1: Resolve address to slug via search API ────────────────────────
     async function orSearch(key) {
@@ -218,6 +217,7 @@ async function fetchOneRoof(address) {
     }
 
     function findBest(properties) {
+      if (!properties.length) return null;
       const ranked = properties
         .map(p => ({ p, r: matchAddress(qParsed, parseAddress(p.pureLabel ?? '')) }))
         .filter(x => x.r.match);
@@ -250,18 +250,16 @@ async function fetchOneRoof(address) {
         source:     'OneRoof',
         estimate:   null,
         url:        null,
-        confidence: null,
         error:      /OneRoof/.test(err.message) ? err.message : 'OneRoof request failed',
       };
     }
 
     if (!best) {
-      return { source: 'OneRoof', estimate: null, url: null, confidence: null,
+      return { source: 'OneRoof', estimate: null, url: null,
                error: 'Address not found on OneRoof' };
     }
 
-    pageUrl    = `${OR_BASE_URL}/property/${best.slug}`;
-    confidence = matchAddress(qParsed, parseAddress(best.pureLabel ?? '')).confidence ?? 'medium';
+    pageUrl = `${OR_BASE_URL}/property/${best.slug}`;
   }
 
   // ── Step 2: Fetch property page and parse RSC AVM data ────────────────────
@@ -274,18 +272,18 @@ async function fetchOneRoof(address) {
     html = await resp.text();
   } catch (err) {
     return {
-      source: 'OneRoof', estimate: null, url: pageUrl, confidence,
+      source: 'OneRoof', estimate: null, url: pageUrl,
       error: /OneRoof/.test(err.message) ? err.message : 'OneRoof request failed',
     };
   }
 
   const avm = parseOrAvm(html);
   if (!avm) {
-    return { source: 'OneRoof', estimate: null, url: pageUrl, confidence,
+    return { source: 'OneRoof', estimate: null, url: pageUrl,
              error: 'No estimate available on OneRoof' };
   }
   if (!avm.showAvm || !avm.estimate) {
-    return { source: 'OneRoof', estimate: null, url: pageUrl, confidence,
+    return { source: 'OneRoof', estimate: null, url: pageUrl,
              error: 'OneRoof estimate not available for this property' };
   }
 
@@ -293,7 +291,6 @@ async function fetchOneRoof(address) {
     source:     'OneRoof',
     estimate:   avm.estimate,   // e.g. "$1,425,000"
     url:        pageUrl,
-    confidence,
     error:      null,
   };
 }
@@ -360,6 +357,7 @@ async function fetchHomes(address) {
   }
 
   function findExact(results, qp) {
+    if (!results.length) return null;
     const matches = results.filter(r => matchAddress(qp, parseAddress(r.Title ?? '')).match);
     if (!matches.length) return null;
     // Prefer building-level record (no unit) when query has no unit.
@@ -415,7 +413,6 @@ async function fetchHomes(address) {
         source:     'homes.co.nz',
         estimate:   null,
         url:        null,
-        confidence: null,
         error:      /homes\.co\.nz/.test(err.message) ? err.message : 'homes.co.nz request failed',
       };
     }
@@ -443,7 +440,6 @@ async function fetchHomes(address) {
         source:     'homes.co.nz',
         estimate:   null,
         url:        null,
-        confidence: null,
         error:      /homes\.co\.nz/.test(err.message) ? err.message : 'homes.co.nz request failed',
       };
     }
@@ -462,12 +458,11 @@ async function fetchHomes(address) {
       source:     'homes.co.nz',
       estimate:   `$${lo} \u2013 $${hi}`,   // e.g. "$920K – $1.04M"
       url:        pageUrl,
-      confidence: 'high',
       error:      null,
     };
   }
 
-  return { source: 'homes.co.nz', estimate: null, url: lastUrl, confidence: null, error: lastError };
+  return { source: 'homes.co.nz', estimate: null, url: lastUrl, error: lastError };
 }
 
 // ─── PropertyValue fetcher ───────────────────────────────────────────────
@@ -534,7 +529,7 @@ async function fetchPropertyValue(address) {
       break;
     }
     if (!found) {
-      return { source: 'PropertyValue', estimate: null, url: null, confidence: null,
+      return { source: 'PropertyValue', estimate: null, url: null,
                error: 'Address not found on PropertyValue' };
     }
   } catch (err) {
@@ -542,7 +537,6 @@ async function fetchPropertyValue(address) {
       source:     'PropertyValue',
       estimate:   null,
       url:        null,
-      confidence: null,
       error:      /PropertyValue/.test(err.message) ? err.message : 'PropertyValue request failed',
     };
   }
@@ -565,7 +559,6 @@ async function fetchPropertyValue(address) {
       source:     'PropertyValue',
       estimate:   null,
       url:        null,
-      confidence: null,
       error:      /PropertyValue/.test(err.message) ? err.message : 'PropertyValue request failed',
     };
   }
@@ -589,7 +582,7 @@ async function fetchPropertyValue(address) {
     const houseMismatch = qParsed.houseNum && cParsed.houseNum && qParsed.houseNum !== cParsed.houseNum;
     if (unitMismatch || houseMismatch) {
       return { source: 'PropertyValue', estimate: null,
-               url: PV_BASE_URL + pvPath, confidence: null,
+               url: PV_BASE_URL + pvPath,
                error: 'No estimate available on PropertyValue' };
     }
   }
@@ -597,19 +590,16 @@ async function fetchPropertyValue(address) {
   const range = detail.estimatedRange;
   if (!range || range.lowerBand == null || range.upperBand == null) {
     return { source: 'PropertyValue', estimate: null,
-             url: pvPath ? PV_BASE_URL + pvPath : null, confidence: null,
+             url: pvPath ? PV_BASE_URL + pvPath : null,
              error: 'No estimate available on PropertyValue' };
   }
 
-  const confidenceMap = { HIGH: 'high', MEDIUM: 'medium', LOW: 'low' };
-  const confidence = confidenceMap[(range.confidence ?? '').toUpperCase()] ?? null;
-  const pageUrl    = pvPath ? PV_BASE_URL + pvPath : null;
+  const pageUrl = pvPath ? PV_BASE_URL + pvPath : null;
 
   return {
     source:   'PropertyValue',
     estimate: pvFormatEstimate(range.lowerBand, range.upperBand),
     url:      pageUrl,
-    confidence,
     error:    null,
   };
 }
@@ -657,6 +647,7 @@ async function fetchRealEstate(address) {
   }
 
   function pickBest(listings) {
+    if (!listings.length) return null;
     const ranked = listings
       .map(r => ({ r, m: matchAddress(qParsed, parseAddress(r['street-address'] ?? '')) }))
       .filter(x => x.m.match);
@@ -681,13 +672,13 @@ async function fetchRealEstate(address) {
 
     const best = pickBest(listings);
     if (!best) {
-      return { source: 'RealEstate.co.nz', estimate: null, url: null, confidence: null,
+      return { source: 'RealEstate.co.nz', estimate: null, url: null,
                error: 'Address not found on RealEstate.co.nz' };
     }
 
     listingId = best['listing-id'];
   } catch (err) {
-    return { source: 'RealEstate.co.nz', estimate: null, url: null, confidence: null,
+    return { source: 'RealEstate.co.nz', estimate: null, url: null,
              error: 'RealEstate.co.nz request failed' };
   }
 
@@ -708,7 +699,7 @@ async function fetchRealEstate(address) {
   } catch { /* non-fatal — fall through without AVM */ }
 
   if (!propertyShortId) {
-    return { source: 'RealEstate.co.nz', estimate: null, url: null, confidence: null,
+    return { source: 'RealEstate.co.nz', estimate: null, url: null,
              error: 'Address not found on RealEstate.co.nz' };
   }
 
@@ -727,12 +718,11 @@ async function fetchRealEstate(address) {
     const pageUrl  = attrs['website-full-url'] ?? null;
 
     // confidence-rating 1 = minimum (API has essentially no confidence) → suppress.
-    // confidence-rating 2+ = show with appropriate label.
-    const confMap    = { 5: 'high', 4: 'high', 3: 'medium', 2: 'low' };
-    const confidence = ev ? (confMap[ev['confidence-rating']] ?? null) : null;
+    // confidence-rating 2+ = show estimate.
+    const showEstimate = ev && ev['confidence-rating'] >= 2;
 
-    if (!ev || ev['value-low'] == null || ev['value-high'] == null || confidence === null) {
-      return { source: 'RealEstate.co.nz', estimate: null, url: pageUrl, confidence: null,
+    if (!ev || ev['value-low'] == null || ev['value-high'] == null || !showEstimate) {
+      return { source: 'RealEstate.co.nz', estimate: null, url: pageUrl,
                error: 'No estimate available on RealEstate.co.nz' };
     }
 
@@ -740,11 +730,10 @@ async function fetchRealEstate(address) {
       source:   'RealEstate.co.nz',
       estimate: `${fmtAmount(ev['value-low'])} \u2013 ${fmtAmount(ev['value-high'])}`,
       url:      pageUrl,
-      confidence,
       error:    null,
     };
   } catch {
-    return { source: 'RealEstate.co.nz', estimate: null, url: null, confidence: null,
+    return { source: 'RealEstate.co.nz', estimate: null, url: null,
              error: 'No estimate available on RealEstate.co.nz' };
   }
 }
@@ -783,7 +772,6 @@ function runFetchers(address, sources, tabId, sendResponse) {
         source:     'unknown',
         estimate:   null,
         url:        null,
-        confidence: null,
         error:      outcome.reason?.message ?? String(outcome.reason),
       };
     });
