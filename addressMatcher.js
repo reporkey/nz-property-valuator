@@ -172,7 +172,8 @@
       nameWords  = words;
     }
 
-    let streetName = nameWords.join(' ').toLowerCase();
+    let streetName = nameWords.join(' ').toLowerCase()
+      .replace(/[''`\u2018\u2019]/g, '');   // strip apostrophes for matching ("d'amarres" → "damarres")
 
     // Apply suburb expansion to street name (handles "Mt Eden Road" etc.)
     streetName = expandSuburbAbbrev(streetName);

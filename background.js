@@ -9,6 +9,10 @@
 
 importScripts('addressMatcher.js');
 
+// Strip apostrophes / curly quotes from search queries so that street names
+// like "Rue D'Amarres" don't break API searches or Cloudflare WAF rules.
+const stripApos = s => s?.replace(/[''`\u2018\u2019]/g, '') ?? s;
+
 // ─── In-memory cache ──────────────────────────────────────────────────────
 // Keyed by fullAddress string; entries expire after 30 minutes.
 // The service worker may be terminated between page loads but survives across
@@ -224,6 +228,7 @@ async function fetchOneRoof(address) {
     // Continuing past such false-positive result sets lets us reach a cleaner query.
     const streetSuburb = [address.streetAddress, address.suburb].filter(Boolean).join(', ');
     const queryList = [address.fullAddress, streetSuburb, address.streetAddress]
+      .map(stripApos)
       .filter((q, i, arr) => q && arr.indexOf(q) === i); // dedup
 
     let best = null;

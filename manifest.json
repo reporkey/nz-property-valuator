@@ -4,19 +4,16 @@
   "version": "1.0.0",
   "description": "See what any NZ property is worth from four sources on one page.",
 
-  "permissions": ["activeTab", "storage"],
+  "permissions": ["storage"],
 
   "homepage_url": "https://github.com/reporkey/nz-property-valuator",
 
   "host_permissions": [
     "https://www.trademe.co.nz/*",
     "https://www.oneroof.co.nz/*",
-    "https://www.homes.co.nz/*",
-    "https://homes.co.nz/*",
     "https://gateway.homes.co.nz/*",
     "https://www.propertyvalue.co.nz/*",
     "https://www.realestate.co.nz/*",
-    "https://realestate.co.nz/*",
     "https://platform.realestate.co.nz/*"
   ],
 
