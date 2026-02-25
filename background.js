@@ -167,12 +167,20 @@ function parseOrAvm(html) {
   const str  = key => { const r = new RegExp(`"${key}"\\s*:\\s*"([^"]+)"`).exec(obj); return r?.[1] ?? null; };
   const bool = key => { const r = new RegExp(`"${key}"\\s*:\\s*(true|false)`).exec(obj); return r ? r[1] === 'true' : null; };
 
+  // OneRoof has two showAvm flags: one inside the avm object and a property-level
+  // one right after it.  The property-level flag controls whether the website
+  // actually displays the estimate (e.g. "Insufficient data" when false).
+  // Check the ~200 chars after the avm object for the outer flag.
+  const afterAvm = allText.slice(objMatch.index + objMatch[0].length, objMatch.index + objMatch[0].length + 200);
+  const outerShowAvm = /"showAvm"\s*:\s*(true|false)/.exec(afterAvm);
+  const showAvm = outerShowAvm ? outerShowAvm[1] === 'true' : (bool('showAvm') ?? true);
+
   const rawEst = str('avm');
   const n = rawEst ? Number(rawEst.replace(/[$,]/g, '')) : NaN;
   return {
     estimate:        isFinite(n) && n > 0 ? fmtAmount(n) : (rawEst ?? null),
     confidenceScore: str('confidenceScore'), // "High"|"Medium"|"Low"
-    showAvm:         bool('showAvm') ?? true,
+    showAvm,
   };
 }
 
