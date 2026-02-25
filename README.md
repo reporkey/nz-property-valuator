@@ -1,6 +1,6 @@
 # NZ Property Valuator
 
-A Chrome Extension (Manifest V3) that overlays property valuation data directly onto NZ real estate listing pages.
+A Chrome Extension that overlays property valuation data directly onto NZ real estate listing pages.
 
 ## Purpose
 
@@ -8,13 +8,18 @@ When browsing a property listing on TradeMe, OneRoof, or RealEstate.co.nz, the e
 
 ## Supported sites
 
-| Site | Role |
-|------|------|
-| trademe.co.nz | Listing surface (content script injected here) |
-| oneroof.co.nz | Listing surface + valuation data source |
-| realestate.co.nz | Listing surface + valuation data source |
-| homes.co.nz | Valuation data source |
-| propertyvalue.co.nz | Valuation data source |
+Panel is injected on these listing sites:
+- trademe.co.nz
+- oneroof.co.nz
+- realestate.co.nz
+
+## Data sources
+
+Valuation estimates are fetched from:
+- OneRoof
+- homes.co.nz
+- PropertyValue.co.nz
+- RealEstate.co.nz
 
 ## Project structure
 
