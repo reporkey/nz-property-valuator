@@ -1,6 +1,6 @@
-🏠 See what any NZ property is worth from four sources — without leaving the listing you're on.
+Tired of seeing "By Negotiation", "Deadline Sale", or "Price by Application" with no clue what a property is actually worth?
 
-Open a listing on TradeMe, OneRoof, or RealEstate.co.nz and a panel instantly shows estimates from OneRoof, homes.co.nz, PropertyValue.co.nz, and RealEstate.co.nz.
+This extension collects price estimates from four NZ property data sources — OneRoof, homes.co.nz, PropertyValue.co.nz, and RealEstate.co.nz — and shows them in a single panel right on the listing page. Works on TradeMe, OneRoof, and RealEstate.co.nz.
 
 💰 Four sources, one page — spot when estimates agree or diverge.
 🔒 Free, private, no sign-in, no data collected.

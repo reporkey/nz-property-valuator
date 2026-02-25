@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "NZ Property Valuator",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "See what any NZ property is worth from four sources on one page.",
 
   "permissions": ["storage"],

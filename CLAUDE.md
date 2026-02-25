@@ -41,11 +41,10 @@ Response to `FETCH_VALUATIONS`: `{ ok: true, results: [...], fromCache: bool }`
 
 Each fetcher returns (never throws):
 ```js
-{ source, estimate, url, confidence, error }
+{ source, estimate, url, error }
 // estimate: formatted string e.g. "$1.43M" or "$920K – $1.04M", or null
-// confidence: "high" | "medium" | "low" | null
 // error: string describing the failure, or null on success
-// disabled: true (only when source is toggled off — omit estimate/url/confidence/error)
+// disabled: true (only when source is toggled off — omit estimate/url/error)
 ```
 
 ## Per-source fetch flows
