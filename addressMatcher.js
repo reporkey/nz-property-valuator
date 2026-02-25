@@ -123,7 +123,7 @@
     }
 
     // ── Parse unit + house number from streetPart ─────────────────────────
-    let unitNum = null, houseNum = null, streetBody = null;
+    let unitNum = null, houseNum = null, streetBody = null, prefix = null;
 
     // Pattern A: "1/42 Smith Street" or "1A/42B Smith St" (tolerates "1/ 42")
     const patA = /^(\d+[a-z]?)\/\s*(\d+[a-z]?)\s+(.+)/i.exec(streetPart);
@@ -150,6 +150,29 @@
         unitNum    = null;
         houseNum   = patC[1].toLowerCase();
         streetBody = patC[2];
+      }
+    }
+
+    // Pattern D: "<Prefix> <number-patterns>" — non-standard property-type prefix
+    // e.g. "Boatshed 11/1 Ngapipi Road", "Shop 3 Main Street", "Villa 5A Oak Ave"
+    // Strip the leading word, save as prefix, re-run patterns A/C on the remainder.
+    if (!streetBody) {
+      const patD = /^([a-z]+)\s+(\d.+)/i.exec(streetPart);
+      if (patD) {
+        prefix = patD[1].toLowerCase();
+        const rest = patD[2];
+        const rA = /^(\d+[a-z]?)\/\s*(\d+[a-z]?)\s+(.+)/i.exec(rest);
+        if (rA) {
+          unitNum    = rA[1].toLowerCase();
+          houseNum   = rA[2].toLowerCase();
+          streetBody = rA[3];
+        } else {
+          const rC = /^(\d+[a-z]?)\s+(.+)/i.exec(rest);
+          if (rC) {
+            houseNum   = rC[1].toLowerCase();
+            streetBody = rC[2];
+          }
+        }
       }
     }
 
@@ -210,6 +233,7 @@
     }
 
     return {
+      prefix,
       unitNum,
       houseNum,
       streetName,
@@ -222,7 +246,7 @@
   }
 
   function _invalid() {
-    return { unitNum: null, houseNum: null, streetName: null, streetType: null,
+    return { prefix: null, unitNum: null, houseNum: null, streetName: null, streetType: null,
              suburb: null, city: null, postcode: null, valid: false };
   }
 
