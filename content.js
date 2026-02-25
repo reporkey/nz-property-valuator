@@ -125,13 +125,14 @@
   }
 
   // Move the panel to the adapter's preferred anchor, if one is found.
+  // Returns true if the anchor was found and the panel was moved.
   function relocatePanel() {
     const host = document.getElementById('nz-valuator-host');
-    if (!host) return;
+    if (!host) return false;
 
     const anchor = window.NZValuatorAdapter.findPanelAnchor();
-    if (anchor) anchor.insertAdjacentElement('afterend', host);
-    // else leave at body.prepend position
+    if (anchor) { anchor.insertAdjacentElement('afterend', host); return true; }
+    return false;
   }
 
   // ─── Panel state helpers ──────────────────────────────────────────────────
@@ -316,6 +317,13 @@
 
   function startPolling() {
     if (pollTimer !== null) { clearTimeout(pollTimer); pollTimer = null; }
+    // Try once synchronously — avoids a 300ms flash when address is already available.
+    const address = window.NZValuatorAdapter.tryExtract();
+    if (address) {
+      relocatePanel();
+      requestValuations(address);
+      return;
+    }
     pollStart = Date.now();
     schedulePoll();
   }
@@ -387,9 +395,10 @@
         // Results may be cached; request again (fast cache hit) and try to
         // relocate once the framework has finished rendering the anchor element.
         requestValuations(currentAddress);
-        setTimeout(relocatePanel, 500);
+        // Try relocate immediately; if anchor isn't ready yet, retry shortly.
+        if (!relocatePanel()) setTimeout(relocatePanel, 200);
       } else {
-        startPolling();
+        startPolling();  // startPolling now tries synchronously first
       }
     });
     panelObserver.observe(document.documentElement, { childList: true, subtree: true });
