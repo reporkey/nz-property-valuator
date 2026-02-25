@@ -4,4 +4,4 @@ This extension collects price estimates from four NZ property data sources — O
 
 💰 Four sources, one page — spot when estimates agree or diverge.
 🔒 Free, private, no sign-in, no data collected.
-☕ If it saves you time, buy me a coffee at buymeacoffee.com/reporkey
+☕ If it saves you time, buy me a coffee at https://www.buymeacoffee.com/reporkey

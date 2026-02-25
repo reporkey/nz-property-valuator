@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "NZ Property Valuator",
-  "version": "1.0.1",
-  "description": "See what any NZ property is worth from four sources on one page.",
+  "version": "1.0.0",
+  "description": "Listing says 'By Negotiation'? See price estimates from four NZ property sources right on the page.",
 
   "permissions": ["storage"],
 
