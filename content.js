@@ -352,11 +352,13 @@
   // Next.js and Angular both use pushState routing.  Patch history.pushState /
   // replaceState and listen for popstate so we restart on every navigation.
 
-  let lastUrl = location.href;
+  let lastUrl  = location.href;
+  let activated = false;   // set to true by activate(); guards DOM work
 
   function handleNavigation() {
     if (location.href === lastUrl) return; // replaceState with the same URL
     lastUrl = location.href;
+    if (!activated) return; // background tab — don't touch the DOM yet
 
     // Tear down the old panel and observer — we may have navigated away.
     stopPanelObserver();
@@ -372,11 +374,21 @@
     startPolling();
   }
 
+  // Patch history methods at module scope so SPA navigations are always
+  // caught, even before activate() runs.  The `activated` guard inside
+  // handleNavigation prevents DOM work until the tab is visible.
   ['pushState', 'replaceState'].forEach(method => {
     const original = history[method].bind(history);
     history[method] = (...args) => { original(...args); handleNavigation(); };
   });
   window.addEventListener('popstate', handleNavigation);
+
+  // Fallback: poll for URL changes to catch navigations that bypass
+  // pushState/replaceState (e.g. Navigation API, framework internals,
+  // or Zone.js wrappers that shadow our patches).
+  setInterval(() => {
+    if (location.href !== lastUrl) handleNavigation();
+  }, 300);
 
   // ─── Panel survival observer ───────────────────────────────────────────────
   // Some SPA frameworks (e.g. Ember.js on realestate.co.nz) do a full DOM
@@ -415,15 +427,23 @@
     stopPanelObserver();
   });
 
-  // ─── Bootstrap ────────────────────────────────────────────────────────────
-  // Show the panel immediately in loading state so the user knows the
-  // extension is active, even before the page has rendered listing data.
-  // Only activate on individual listing pages, not search/browse pages.
+  // ─── Activation ──────────────────────────────────────────────────────────
+  // Use requestAnimationFrame to defer DOM work (panel injection, observer,
+  // polling) by one paint frame.  In a visible tab rAF fires in ~16 ms
+  // (essentially immediate).  In a background tab rAF is paused until the
+  // tab becomes visible, which lets the SPA bootstrap undisturbed.
 
-  if (window.NZValuatorAdapter.isListingPage()) {
-    currentShadow = injectPanel();
-    startPanelObserver();
-    startPolling();
+  function activate() {
+    activated = true;
+    lastUrl = location.href;
+
+    if (window.NZValuatorAdapter.isListingPage()) {
+      currentShadow = injectPanel();
+      startPanelObserver();
+      startPolling();
+    }
   }
+
+  requestAnimationFrame(activate);
 
 })();
