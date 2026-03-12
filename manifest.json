@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "NZ Property Valuator",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Listing says 'By Negotiation'? See price estimates from four NZ property sources right on the page.",
 
   "permissions": ["storage"],
@@ -30,7 +30,7 @@
 
   "content_scripts": [
     {
-      "matches": ["https://www.trademe.co.nz/a/*"],
+      "matches": ["https://www.trademe.co.nz/a/property/*"],
       "js": ["sites/trademe.js", "content.js"],
       "run_at": "document_idle"
     },
