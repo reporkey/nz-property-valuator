@@ -1,7 +1,7 @@
 Tired of seeing "By Negotiation", "Deadline Sale", or "Price by Application" with no clue what a property is actually worth?
 
-This extension collects price estimates from four NZ property data sources — OneRoof, homes.co.nz, PropertyValue.co.nz, and RealEstate.co.nz — and shows them in a single panel right on the listing page. Works on TradeMe, OneRoof, and RealEstate.co.nz.
+This extension collects price estimates from three NZ property data sources — OneRoof, homes.co.nz, and RealEstate.co.nz — and shows them in an embedded panel on residential sale listings. Works on TradeMe, OneRoof, and RealEstate.co.nz. Rental, commercial, and search pages are excluded.
 
-💰 Four sources, one page — spot when estimates agree or diverge.
+💰 Three sources, one page — spot when estimates agree or diverge.
 🔒 Free, private, no sign-in, no data collected.
 ☕ If it saves you time, buy me a coffee at https://www.buymeacoffee.com/reporkey

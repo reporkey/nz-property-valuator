@@ -1,25 +1,24 @@
 {
   "manifest_version": 3,
   "name": "NZ Property Valuator",
-  "version": "1.0.1",
-  "description": "Listing says 'By Negotiation'? See price estimates from four NZ property sources right on the page.",
-
-  "permissions": ["storage"],
-
+  "version": "1.0.3",
+  "description": "Listing says 'By Negotiation'? See price estimates from three NZ property sources right on the page.",
+  "permissions": [
+    "storage"
+  ],
   "homepage_url": "https://github.com/reporkey/nz-property-valuator",
-
   "host_permissions": [
     "https://www.trademe.co.nz/*",
     "https://www.oneroof.co.nz/*",
     "https://gateway.homes.co.nz/*",
-    "https://www.propertyvalue.co.nz/*",
     "https://www.realestate.co.nz/*",
     "https://platform.realestate.co.nz/*"
   ],
-
   "web_accessible_resources": [
     {
-      "resources": ["panel.css"],
+      "resources": [
+        "panel.css"
+      ],
       "matches": [
         "https://www.trademe.co.nz/*",
         "https://www.oneroof.co.nz/*",
@@ -27,29 +26,44 @@
       ]
     }
   ],
-
   "content_scripts": [
     {
-      "matches": ["https://www.trademe.co.nz/a/property/*"],
-      "js": ["sites/trademe.js", "content.js"],
+      "matches": [
+        "https://www.trademe.co.nz/a/property/residential/sale/*"
+      ],
+      "js": [
+        "addressMatcher.js",
+        "sites/trademe.js",
+        "content.js"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://www.oneroof.co.nz/property/*"],
-      "js": ["sites/oneroof.js", "content.js"],
+      "matches": [
+        "https://www.oneroof.co.nz/property/*"
+      ],
+      "js": [
+        "addressMatcher.js",
+        "sites/oneroof.js",
+        "content.js"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://www.realestate.co.nz/*"],
-      "js": ["sites/realestate.js", "content.js"],
+      "matches": [
+        "https://www.realestate.co.nz/*/residential/sale/*"
+      ],
+      "js": [
+        "addressMatcher.js",
+        "sites/realestate.js",
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ],
-
   "background": {
     "service_worker": "background.js"
   },
-
   "action": {
     "default_popup": "popup.html",
     "default_title": "NZ Property Valuator",
@@ -60,7 +74,6 @@
       "128": "icons/icon128.png"
     }
   },
-
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",

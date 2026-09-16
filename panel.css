@@ -10,6 +10,26 @@
   color: #1a1a2e;
 }
 
+.nzvp-toggle {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 16px;
+  border: 0;
+  background: #fff;
+  color: #1a1a2e;
+  text-align: left;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+#nzvp-address { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nzvp-toggle-label { flex-shrink: 0; color: #228be6; font-size: 12px; }
+.nzvp-body[hidden] { display: none; }
+
 .nzvp-panel {
   background: #ffffff;
   border-radius: 12px;
@@ -32,7 +52,7 @@
 
 .nzvp-cards {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 12px;
 }
 

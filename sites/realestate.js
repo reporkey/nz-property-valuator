@@ -15,8 +15,8 @@
  *      → split on first comma to isolate the street portion
  *   2. h1 text (DOM fallback — comma-separated: street, suburb, region)
  *
- * Panel anchor: the h1's enclosing section block (div.border-b), placing
- * the panel between the address heading and the price row.
+ * Only residential sale routes are eligible. Panel rendering is handled by
+ * content.js after the page's insertion area is ready.
  */
 
 (() => {
@@ -64,11 +64,17 @@
 
   window.NZValuatorAdapter = {
 
+    findPanelAnchor() {
+      const heading = document.querySelector('h1');
+      return heading?.closest('div.border-b') || heading;
+    },
+
     isListingPage() {
       // Listing URLs: /{numeric-id}/residential/{type}/{slug}
       // Browse/search: /residential/sale/auckland (first segment is "residential")
       const parts = location.pathname.split('/').filter(Boolean);
-      return /^\d{6,}$/.test(parts[0]) && parts[1] === 'residential';
+      return location.hostname === 'www.realestate.co.nz' &&
+        /^\d{6,}$/.test(parts[0]) && parts[1] === 'residential' && parts[2] === 'sale' && parts.length === 4;
     },
 
     tryExtract() {
@@ -89,12 +95,5 @@
       return null;
     },
 
-    findPanelAnchor() {
-      // h1 → flex wrapper → border-b section block (address heading).
-      // Inserting after the section block places the panel between the
-      // address heading and the price row.
-      const h1 = document.querySelector('h1');
-      return h1?.parentElement?.parentElement ?? h1 ?? null;
-    },
   };
 })();

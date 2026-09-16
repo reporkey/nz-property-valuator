@@ -40,12 +40,11 @@ function setCached(fullAddress, results) {
 // Source keys must match the `source` field returned by each fetcher.
 // Defaults are read from chrome.storage.sync; used as fallback if unavailable.
 
-const DISPLAYED_SOURCES = ['OneRoof', 'homes.co.nz', 'PropertyValue', 'RealEstate.co.nz'];
+const DISPLAYED_SOURCES = ['OneRoof', 'homes.co.nz', 'RealEstate.co.nz'];
 
 const DEFAULT_SOURCE_SETTINGS = {
   OneRoof:            { enabled: true },
   'homes.co.nz':      { enabled: true },
-  PropertyValue:      { enabled: true },
   'RealEstate.co.nz': { enabled: true },
 };
 
@@ -465,143 +464,10 @@ async function fetchHomes(address) {
   return { source: 'homes.co.nz', estimate: null, url: lastUrl, error: lastError };
 }
 
-// ─── PropertyValue fetcher ───────────────────────────────────────────────
-// Flow:
-//   1. GET /api/public/clapi/suggestions?q=<fullAddress>&suggestionTypes=address&limit=5
-//      → suggestions[0].propertyId  (integer)
-//   2. GET /api/public/clapi/properties/<propertyId>
-//      → estimatedRange: { lowerBand, upperBand, confidence }
-//         ratingValuation: { capitalValue, valuationDate }
-//   3. GET /api/public/clapi/properties/propertyUrl?propertyId=<id>
-//      → plain string path  e.g. "/wellington/wellington-city/…/7120741"
-//
-// No auth required; Imperva WAF only guards the HTML layer.
-// Confidence mapping: "HIGH" → "high", "MEDIUM" → "medium", "LOW" → "low".
-
-const PV_BASE_URL = 'https://www.propertyvalue.co.nz';
-
 // Format a dollar amount using K/M suffixes: 560000 → "$560K", 1425000 → "$1.43M".
 function fmtAmount(n) {
   if (n >= 1_000_000) return '$' + parseFloat((n / 1_000_000).toFixed(2)) + 'M';
   return '$' + Math.round(n / 1_000) + 'K';
-}
-
-function pvFormatEstimate(lowerBand, upperBand) {
-  return `${fmtAmount(lowerBand)} – ${fmtAmount(upperBand)}`;
-}
-
-async function fetchPropertyValue(address) {
-  const qParsed = parseAddress(address.streetAddress, address.suburb, address.city);
-
-  // ── Step 1: Autocomplete → propertyId ────────────────────────────────────
-  // PropertyValue's suggestions API returns 404 for some suburb+city
-  // combinations (e.g. "Red Beach, Auckland") but succeeds when the city is
-  // omitted.  Try progressively shorter queries until we get a 200 with hits.
-  // PropertyValue's autocomplete breaks on apostrophised names: "D'Amarres" and
-  // "D Amarres" both return 0 hits, but truncating before the apostrophe ("36 Rue D")
-  // succeeds.  Add the truncated form as a fallback query; the slug validation in
-  // step 2/3 guards against false positives.
-  const pvTruncApos = s => {
-    if (!s) return null;
-    const m = s.match(/^(.*?\S)[''`\u2018\u2019]/);
-    return m ? m[1].trim() : null;  // "36 Rue D'Amarres" → "36 Rue D"
-  };
-  const pvSuggestQueries = [
-    address.fullAddress,                                         // street + suburb + city
-    [address.streetAddress, address.suburb].filter(Boolean).join(', '), // street + suburb
-    address.streetAddress,                                       // street only
-    pvTruncApos(address.streetAddress),                          // truncated at apostrophe
-  ].filter((q, i, arr) => q && arr.indexOf(q) === i);           // deduplicate
-
-  let propertyId;
-  try {
-    let found = false;
-    for (const q of pvSuggestQueries) {
-      const url  = `${PV_BASE_URL}/api/public/clapi/suggestions` +
-        `?q=${encodeURIComponent(q)}&suggestionTypes=address&limit=5`;
-      const resp = await fetchWithBackoff(url);
-      if (!resp.ok) continue;                   // try next query variant
-      const data        = await resp.json();
-      const suggestions = data.suggestions ?? [];
-      if (suggestions.length === 0) continue;   // no hits, try shorter query
-      propertyId = suggestions[0].propertyId;
-      found = true;
-      break;
-    }
-    if (!found) {
-      return { source: 'PropertyValue', estimate: null, url: null,
-               error: 'Address not found on PropertyValue' };
-    }
-  } catch (err) {
-    return {
-      source:     'PropertyValue',
-      estimate:   null,
-      url:        null,
-      error:      /PropertyValue/.test(err.message) ? err.message : 'PropertyValue request failed',
-    };
-  }
-
-  // ── Step 2 & 3: Property detail + URL (in parallel) ───────────────────────
-  const detailUrl = `${PV_BASE_URL}/api/public/clapi/properties/${propertyId}`;
-  const pvUrlUrl  = `${PV_BASE_URL}/api/public/clapi/properties/propertyUrl?propertyId=${propertyId}`;
-
-  let detail, pvPath;
-  try {
-    const [detailResp, pvUrlResp] = await Promise.all([
-      fetchWithBackoff(detailUrl),
-      fetchWithBackoff(pvUrlUrl),
-    ]);
-    if (!detailResp.ok) throw new Error(`PropertyValue request failed (HTTP ${detailResp.status})`);
-    detail  = await detailResp.json();
-    pvPath  = pvUrlResp.ok ? (await pvUrlResp.text()).trim() : null;
-  } catch (err) {
-    return {
-      source:     'PropertyValue',
-      estimate:   null,
-      url:        null,
-      error:      /PropertyValue/.test(err.message) ? err.message : 'PropertyValue request failed',
-    };
-  }
-
-  // Validate that the resolved property matches our street address.
-  // PV suggestions sometimes return a unit record when we searched for the
-  // building (e.g. "1/20 Charlotte Street" when we want "20 Charlotte Street").
-  // Parse the slug as an address and compare components.
-  if (pvPath) {
-    const lastSlug = pvPath.split('/').filter(Boolean).pop() ?? '';
-    let slugStr  = lastSlug.replace(/-/g, ' ').replace(/\d{5,}\s*$/, '').trim();
-    // PV slugs encode "502/1817A" as "502-1817a" → "502 1817a", losing the
-    // unit slash.  Re-insert it when the query has a unit number so parseAddress
-    // correctly identifies unit vs house.
-    if (qParsed.unitNum !== null) {
-      const um = slugStr.match(/^(\d+[a-z]?)\s+(\d+[a-z]?\s+.+)/i);
-      if (um) slugStr = um[1] + '/' + um[2];
-    }
-    const cParsed  = parseAddress(slugStr);
-    const unitMismatch  = qParsed.unitNum === null && cParsed.unitNum !== null;
-    const houseMismatch = qParsed.houseNum && cParsed.houseNum && qParsed.houseNum !== cParsed.houseNum;
-    if (unitMismatch || houseMismatch) {
-      return { source: 'PropertyValue', estimate: null,
-               url: PV_BASE_URL + pvPath,
-               error: 'No estimate available on PropertyValue' };
-    }
-  }
-
-  const range = detail.estimatedRange;
-  if (!range || range.lowerBand == null || range.upperBand == null) {
-    return { source: 'PropertyValue', estimate: null,
-             url: pvPath ? PV_BASE_URL + pvPath : null,
-             error: 'No estimate available on PropertyValue' };
-  }
-
-  const pageUrl = pvPath ? PV_BASE_URL + pvPath : null;
-
-  return {
-    source:   'PropertyValue',
-    estimate: pvFormatEstimate(range.lowerBand, range.upperBand),
-    url:      pageUrl,
-    error:    null,
-  };
 }
 
 // ─── RealEstate.co.nz fetcher ────────────────────────────────────────────
@@ -743,13 +609,12 @@ async function fetchRealEstate(address) {
 //   FETCH_VALUATIONS — run enabled fetchers, stream partial results, cache.
 //   CLEAR_CACHE      — wipe the in-memory cache (sent from popup).
 
-function runFetchers(address, sources, tabId, sendResponse) {
+function runFetchers(address, sources, tabId, requestId, sendResponse) {
   const enabled = name => sources[name]?.enabled !== false;
 
   const fetches = [
     enabled('OneRoof')            ? fetchOneRoof(address)       : Promise.resolve(disabledResult('OneRoof')),
     enabled('homes.co.nz')        ? fetchHomes(address)         : Promise.resolve(disabledResult('homes.co.nz')),
-    enabled('PropertyValue')      ? fetchPropertyValue(address)  : Promise.resolve(disabledResult('PropertyValue')),
     enabled('RealEstate.co.nz')   ? fetchRealEstate(address)    : Promise.resolve(disabledResult('RealEstate.co.nz')),
   ];
 
@@ -758,7 +623,7 @@ function runFetchers(address, sources, tabId, sendResponse) {
   if (tabId != null) {
     fetches.forEach(p => {
       p.then(result => {
-        chrome.tabs.sendMessage(tabId, { type: 'VALUATION_UPDATE', result })
+        chrome.tabs.sendMessage(tabId, { type: 'VALUATION_UPDATE', requestId, result })
           .catch(() => {}); // tab may have navigated away
       });
     });
@@ -801,7 +666,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type !== 'FETCH_VALUATIONS') return false;
 
-  const { address } = message;
+  const { address, requestId } = message;
   const cacheKey    = address.fullAddress;
   const tabId       = sender.tab?.id ?? null;
 
@@ -816,8 +681,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Falls back to all-enabled defaults if storage is unavailable.
   chrome.storage.sync
     .get({ sources: DEFAULT_SOURCE_SETTINGS })
-    .then(({ sources }) => runFetchers(address, sources, tabId, sendResponse))
-    .catch(()           => runFetchers(address, DEFAULT_SOURCE_SETTINGS, tabId, sendResponse));
+    .then(({ sources }) => runFetchers(address, sources, tabId, requestId, sendResponse))
+    .catch(()           => runFetchers(address, DEFAULT_SOURCE_SETTINGS, tabId, requestId, sendResponse));
 
   // Return true to keep the message channel open until sendResponse is called.
   return true;

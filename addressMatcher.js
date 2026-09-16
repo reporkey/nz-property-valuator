@@ -64,7 +64,7 @@
 
     let input = raw.trim();
 
-    // ── Detect run-on PropertyValue slug format ───────────────────────────
+    // ── Detect run-on address slug format ───────────────────────────
     // e.g. "865 Waikaretu Valley Road Tuakau Tuakau 2121"
     // Heuristic: no commas, contains a 4-digit postcode, and is long enough
     // to have a locality suffix. Parse postcode, strip trailing property ID,

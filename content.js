@@ -7,8 +7,8 @@
  * Responsible for rendering the valuation panel and requesting estimates
  * from background.js via chrome.runtime messaging.
  *
- * Site-specific logic (address extraction, listing-page detection,
- * panel anchor selection) lives entirely in the adapter.
+ * Site-specific address extraction and sale-listing detection live in the adapter.
+ * The panel is embedded only after its insertion area is ready for DOM changes.
  *
  * Runs at: document_idle
  */
@@ -17,11 +17,10 @@
   'use strict';
 
   const LOG         = '[NZ-Valuator]';
-  const TIMEOUT_MS  = 10_000;   // give up address extraction after 10 s
   const INTERVAL_MS = 300;      // poll every 300 ms
 
   // Sources shown in the panel (fetched via background.js).
-  const SOURCES = ['OneRoof', 'homes.co.nz', 'PropertyValue', 'RealEstate.co.nz'];
+  const SOURCES = ['OneRoof', 'homes.co.nz', 'RealEstate.co.nz'];
 
   // Shorter display names used in link labels.
   const LINK_NAME = { 'homes.co.nz': 'homes', 'RealEstate.co.nz': 'RealEstate' };
@@ -30,9 +29,9 @@
   // ─── Module state ─────────────────────────────────────────────────────────
   let currentShadow  = null;   // shadow root of the active panel
   let currentAddress = null;   // last address passed to requestValuations
-  let pollTimer      = null;   // setTimeout handle for the active poll cycle
-  let pollStart      = 0;      // Date.now() when the current poll cycle began
-  let panelObserver  = null;   // MutationObserver watching for panel removal
+  let activeRequest = null;
+  let pageKey = null;
+  let activated = false;
 
   // ─── Search URL builder ───────────────────────────────────────────────────
   // Returns a URL the user can visit to manually search for the property on
@@ -59,10 +58,6 @@
           return `https://homes.co.nz/map/${city}/${suburb}`;
         return 'https://homes.co.nz/';
       }
-
-      case 'PropertyValue':
-        // No search results page; autocomplete navigates directly to property page.
-        return 'https://www.propertyvalue.co.nz/';
 
       case 'RealEstate.co.nz': {
         // Verified URL pattern: /residential/sale/{region}/{district}/{suburb}
@@ -96,7 +91,11 @@
     const cssUrl = chrome.runtime.getURL('panel.css');
     return `
       <link rel="stylesheet" href="${cssUrl}">
-      <div class="nzvp-panel">
+      <div class="nzvp-panel" role="region" aria-label="Property valuations">
+        <button class="nzvp-toggle" aria-expanded="true" aria-controls="nzvp-body">
+          <span id="nzvp-address">Property valuations</span>
+          <span class="nzvp-toggle-label">Hide estimates</span>
+        </button>
         <div class="nzvp-body" id="nzvp-body">
           <div class="nzvp-cards" id="nzvp-cards">
             ${SOURCES.map(buildCardHTML).join('')}
@@ -106,66 +105,31 @@
       </div>`;
   }
 
-  // ─── Panel injection ──────────────────────────────────────────────────────
-  // Inserts at document.body.prepend immediately so the user sees the panel
-  // in loading state right away.  relocatePanel() moves it once the page
-  // has rendered the preferred anchor element.
+  // Do not alter server-rendered nodes while the page is still loading or
+  // Angular has unclaimed hydration markers in the insertion area.
+  function panelAnchor() {
+    if (document.readyState !== 'complete') return null;
+    const anchor = window.NZValuatorAdapter.findPanelAnchor();
+    if (!anchor?.isConnected || !anchor.parentElement) return null;
+    if (anchor.closest('[ngh]') || anchor.parentElement.querySelector('[ngh]')) return null;
+    return anchor;
+  }
 
-  function injectPanel() {
-    const existing = document.getElementById('nz-valuator-host');
-    if (existing) return existing.shadowRoot;
-
-    const host   = document.createElement('div');
-    host.id      = 'nz-valuator-host';
+  function injectPanel(anchor) {
+    const host = document.createElement('div');
+    host.id = 'nz-valuator-host';
+    host.style.cssText = 'display:block;position:static;clear:both;width:100%;margin:16px 0 20px;';
     const shadow = host.attachShadow({ mode: 'open' });
     shadow.innerHTML = buildPanelHTML();
-
-    document.body.prepend(host);
+    const toggle = shadow.querySelector('.nzvp-toggle');
+    toggle.addEventListener('click', () => {
+      const expanded = toggle.getAttribute('aria-expanded') !== 'true';
+      toggle.setAttribute('aria-expanded', String(expanded));
+      shadow.getElementById('nzvp-body').hidden = !expanded;
+      shadow.querySelector('.nzvp-toggle-label').textContent = expanded ? 'Hide estimates' : 'Show estimates';
+    });
+    anchor.insertAdjacentElement('afterend', host);
     return shadow;
-  }
-
-  // Move the panel to the adapter's preferred anchor, if one is found.
-  // Returns true if the anchor was found and the panel was moved.
-  function relocatePanel() {
-    const host = document.getElementById('nz-valuator-host');
-    if (!host) return false;
-
-    const anchor = window.NZValuatorAdapter.findPanelAnchor();
-    if (anchor) { anchor.insertAdjacentElement('afterend', host); return true; }
-    return false;
-  }
-
-  // ─── Panel state helpers ──────────────────────────────────────────────────
-
-  // Replace the cards grid with a "could not detect" message + manual input.
-  function showNoAddressState(shadow) {
-    const cardsEl = shadow.getElementById('nzvp-cards');
-    if (!cardsEl) return;
-
-    cardsEl.innerHTML = `
-      <div class="nzvp-no-address">
-        <p class="nzvp-no-addr-msg">Could not detect property address.</p>
-        <div class="nzvp-manual-input">
-          <input class="nzvp-addr-input" type="text"
-                 placeholder="e.g. 10 Mahoe Ave, Remuera, Auckland"
-                 aria-label="Property address">
-          <button class="nzvp-search-btn">Search</button>
-        </div>
-      </div>`;
-
-    const input = cardsEl.querySelector('.nzvp-addr-input');
-    const btn   = cardsEl.querySelector('.nzvp-search-btn');
-
-    function doSearch() {
-      const text = input.value.trim();
-      if (!text) return;
-      cardsEl.innerHTML = SOURCES.map(buildCardHTML).join('');
-      const address = { streetAddress: text, suburb: '', city: '', fullAddress: text };
-      requestValuations(address);
-    }
-
-    btn.addEventListener('click', doSearch);
-    input.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
   }
 
   // Prepend an "all failed" banner inside the panel body.
@@ -239,8 +203,13 @@
       } else { linkEl.hidden = true; }
     } else {
       estimateEl.className   = 'nzvp-estimate nzvp-error-state';
-      estimateEl.textContent = 'Failed to load';
-      linkEl.hidden          = true;
+      estimateEl.textContent = /blocked/i.test(result.error) ? 'Access blocked by provider' : 'Failed to load';
+      estimateEl.title = result.error;
+      linkEl.hidden = !result.url;
+      if (result.url) {
+        linkEl.href = result.url;
+        linkEl.textContent = `Open ${linkName(sourceName)} →`;
+      }
     }
   }
 
@@ -284,166 +253,86 @@
     }
   }
 
-  // ─── Messaging ────────────────────────────────────────────────────────────
+  // Results belong to a single request on a single page. Late responses must
+  // not recreate a panel on a rental page or overwrite another property's data.
+  function isCurrentRequest(requestId) {
+    return requestId === activeRequest && currentShadow &&
+      pageKey === location.origin + location.pathname && isEligiblePage();
+  }
 
-  // Receive incremental VALUATION_UPDATE messages streamed from background.js
-  // as each source resolves, so cards update as data arrives.
   chrome.runtime.onMessage.addListener(message => {
-    if (message.type !== 'VALUATION_UPDATE') return;
-    if (!currentShadow) return;
+    if (message.type !== 'VALUATION_UPDATE' || !isCurrentRequest(message.requestId)) return;
     const { result } = message;
     if (SOURCES.includes(result.source)) setCardState(currentShadow, result.source, result, currentAddress);
   });
 
   function requestValuations(address) {
+    if (!currentShadow || !isEligiblePage()) return;
     currentAddress = address;
+    const requestId = crypto.randomUUID();
+    activeRequest = requestId;
+    currentShadow.getElementById('nzvp-address').textContent = address.fullAddress;
     chrome.runtime.sendMessage(
-      { type: 'FETCH_VALUATIONS', address },
+      { type: 'FETCH_VALUATIONS', address, requestId },
       response => {
-        if (chrome.runtime.lastError) {
-          console.error(LOG, 'Messaging error:', chrome.runtime.lastError.message);
+        const error = chrome.runtime.lastError;
+        if (!isCurrentRequest(requestId)) return;
+        if (error || !response?.ok) {
+          console.error(LOG, 'Valuation request failed:', error?.message || response);
+          applyResults(currentShadow, SOURCES.map(source => ({ source, error: 'Valuation request failed' })), address);
           return;
         }
-        if (!response?.ok) {
-          console.error(LOG, 'Background returned an error response:', response);
-          return;
-        }
-        if (currentShadow) applyResults(currentShadow, response.results, address);
+        applyResults(currentShadow, response.results, address);
       }
     );
   }
 
-  // ─── Polling ──────────────────────────────────────────────────────────────
-
-  function startPolling() {
-    if (pollTimer !== null) { clearTimeout(pollTimer); pollTimer = null; }
-    // Try once synchronously — avoids a 300ms flash when address is already available.
-    const address = window.NZValuatorAdapter.tryExtract();
-    if (address) {
-      relocatePanel();
-      requestValuations(address);
-      return;
-    }
-    pollStart = Date.now();
-    schedulePoll();
+  function isEligiblePage() {
+    if (!window.NZValuatorAdapter.isListingPage()) return false;
+    const heading = document.querySelector('h1');
+    if (!heading || /^(whoops!?|oops!?|.*not found|.*unavailable|access denied|.*listing (?:has )?(?:closed|expired))$/i.test(heading.textContent.trim())) return false;
+    // During SPA navigation, the URL can change before the old listing DOM.
+    const canonical = document.querySelector('link[rel="canonical"]')?.href;
+    if (canonical && new URL(canonical, location.href).pathname !== location.pathname) return false;
+    return true;
   }
 
-  function schedulePoll() {
-    pollTimer = setTimeout(doPoll, INTERVAL_MS);
-  }
-
-  function doPoll() {
-    pollTimer = null;
-    const address = window.NZValuatorAdapter.tryExtract();
-    if (address) {
-      relocatePanel();
-      requestValuations(address);
-      return;
-    }
-    if (Date.now() - pollStart >= TIMEOUT_MS) {
-      console.warn(LOG, 'Address extraction timed out — showing manual input');
-      showNoAddressState(currentShadow);
-      return;
-    }
-    schedulePoll();
-  }
-
-  // ─── SPA navigation ───────────────────────────────────────────────────────
-  // Next.js and Angular both use pushState routing.  Patch history.pushState /
-  // replaceState and listen for popstate so we restart on every navigation.
-
-  let lastUrl  = location.href;
-  let activated = false;   // set to true by activate(); guards DOM work
-
-  function handleNavigation() {
-    if (location.href === lastUrl) return; // replaceState with the same URL
-    lastUrl = location.href;
-    if (!activated) return; // background tab — don't touch the DOM yet
-
-    // Tear down the old panel and observer — we may have navigated away.
-    stopPanelObserver();
-    document.getElementById('nz-valuator-host')?.remove();
+  function clearPanel() {
+    activeRequest = null;
     currentShadow = null;
     currentAddress = null;
-
-    if (!window.NZValuatorAdapter.isListingPage()) return;
-
-    // Start fresh — inject panel with loading state, then re-poll.
-    currentShadow = injectPanel();
-    startPanelObserver();
-    startPolling();
+    document.getElementById('nz-valuator-host')?.remove();
   }
 
-  // Patch history methods at module scope so SPA navigations are always
-  // caught, even before activate() runs.  The `activated` guard inside
-  // handleNavigation prevents DOM work until the tab is visible.
-  ['pushState', 'replaceState'].forEach(method => {
-    const original = history[method].bind(history);
-    history[method] = (...args) => { original(...args); handleNavigation(); };
-  });
-  window.addEventListener('popstate', handleNavigation);
-
-  // Fallback: poll for URL changes to catch navigations that bypass
-  // pushState/replaceState (e.g. Navigation API, framework internals,
-  // or Zone.js wrappers that shadow our patches).
-  setInterval(() => {
-    if (location.href !== lastUrl) handleNavigation();
-  }, 300);
-
-  // ─── Panel survival observer ───────────────────────────────────────────────
-  // Some SPA frameworks (e.g. Ember.js on realestate.co.nz) do a full DOM
-  // replacement after their initial render, wiping any element prepended to
-  // document.body.  Watch for the host being removed and re-inject it.
-
-  function startPanelObserver() {
-    if (panelObserver) return;
-    panelObserver = new MutationObserver(() => {
-      if (document.getElementById('nz-valuator-host')) return; // still in DOM
-      if (!window.NZValuatorAdapter.isListingPage()) { stopPanelObserver(); return; }
-
-      currentShadow = injectPanel();
-
-      if (currentAddress) {
-        // Results may be cached; request again (fast cache hit) and try to
-        // relocate once the framework has finished rendering the anchor element.
-        requestValuations(currentAddress);
-        // Try relocate immediately; if anchor isn't ready yet, retry shortly.
-        if (!relocatePanel()) setTimeout(relocatePanel, 200);
-      } else {
-        startPolling();  // startPolling now tries synchronously first
-      }
-    });
-    panelObserver.observe(document.documentElement, { childList: true, subtree: true });
-  }
-
-  function stopPanelObserver() {
-    if (panelObserver) { panelObserver.disconnect(); panelObserver = null; }
-  }
-
-  // ─── Cleanup ──────────────────────────────────────────────────────────────
-
-  window.addEventListener('beforeunload', () => {
-    if (pollTimer !== null) { clearTimeout(pollTimer); pollTimer = null; }
-    stopPanelObserver();
-  });
-
-  // ─── Activation ──────────────────────────────────────────────────────────
-  // Use requestAnimationFrame to defer DOM work (panel injection, observer,
-  // polling) by one paint frame.  In a visible tab rAF fires in ~16 ms
-  // (essentially immediate).  In a background tab rAF is paused until the
-  // tab becomes visible, which lets the SPA bootstrap undisturbed.
-
-  function activate() {
-    activated = true;
-    lastUrl = location.href;
-
-    if (window.NZValuatorAdapter.isListingPage()) {
-      currentShadow = injectPanel();
-      startPanelObserver();
-      startPolling();
+  function syncPage() {
+    if (!activated) return;
+    const nextKey = location.origin + location.pathname;
+    if (nextKey !== pageKey) {
+      clearPanel();
+      pageKey = nextKey;
     }
+    if (!isEligiblePage()) { clearPanel(); return; }
+    const address = window.NZValuatorAdapter.tryExtract();
+    if (!address || !parseAddress(address.streetAddress).valid) { clearPanel(); return; }
+    const anchor = panelAnchor();
+    if (!anchor) { clearPanel(); return; }
+    const host = document.getElementById('nz-valuator-host');
+    if (currentShadow && host && currentAddress?.fullAddress === address.fullAddress) {
+      if (anchor.nextElementSibling !== host) anchor.insertAdjacentElement('afterend', host);
+      return;
+    }
+    clearPanel();
+    currentShadow = injectPanel(anchor);
+    requestValuations(address);
   }
 
-  requestAnimationFrame(activate);
-
+  // Content scripts have an isolated JS world. Polling catches page-world
+  // pushState, same-URL error renders, and delayed sale-status/address updates.
+  const pageTimer = setInterval(syncPage, INTERVAL_MS);
+  window.addEventListener('popstate', syncPage);
+  window.addEventListener('beforeunload', () => {
+    clearInterval(pageTimer);
+    clearPanel();
+  });
+  requestAnimationFrame(() => { activated = true; syncPage(); });
 })();

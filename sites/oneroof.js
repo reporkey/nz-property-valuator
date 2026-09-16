@@ -77,10 +77,21 @@
 
   window.NZValuatorAdapter = {
 
+    findPanelAnchor() {
+      return document.querySelector('main h1, article h1, h1');
+    },
+
     isListingPage() {
       // Must have: property / region / suburb / address-slug [/ property-id]
       const parts = location.pathname.split('/').filter(Boolean);
-      return parts[0] === 'property' && parts.length >= 4;
+      // OneRoof uses the same URL shape for sale, rental and off-market records.
+      // Require the listing's sale title AND its main-content sale breadcrumb;
+      // a sale link in global navigation is not evidence about this property.
+      return location.hostname === 'www.oneroof.co.nz' &&
+        parts[0] === 'property' && parts.length === 5 &&
+        /\|\s*Houses for Sale\s*-\s*OneRoof$/i.test(document.title) &&
+        [...document.querySelectorAll('main a[href^="/search/houses-for-sale/"]')]
+          .some(link => /^for sale$/i.test(link.textContent.trim()));
     },
 
     tryExtract() {
@@ -101,10 +112,5 @@
       return null;
     },
 
-    findPanelAnchor() {
-      // Insert the panel after the property heading in the main content area.
-      const mainEl = document.querySelector('main, article, [role="main"]');
-      return mainEl ? mainEl.querySelector('h1') : document.querySelector('h1');
-    },
   };
 })();

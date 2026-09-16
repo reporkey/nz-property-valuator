@@ -8,12 +8,11 @@
 
 'use strict';
 
-const SOURCES = ['OneRoof', 'homes.co.nz', 'PropertyValue', 'RealEstate.co.nz'];
+const SOURCES = ['OneRoof', 'homes.co.nz', 'RealEstate.co.nz'];
 
 const DEFAULT_SOURCE_SETTINGS = {
   OneRoof:            { enabled: true },
   'homes.co.nz':      { enabled: true },
-  PropertyValue:      { enabled: true },
   'RealEstate.co.nz': { enabled: true },
 };
 

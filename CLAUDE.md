@@ -4,22 +4,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this project does
 
-Chrome Extension (Manifest V3) that enriches TradeMe property listings with valuation estimates from four NZ property data sources: **OneRoof**, **homes.co.nz**, **PropertyValue.co.nz**, and **RealEstate.co.nz**.
+Chrome Extension (Manifest V3) that enriches TradeMe property listings with valuation estimates from three NZ property data sources: **OneRoof**, **homes.co.nz**, and **RealEstate.co.nz**.
 
-All extension files live in the repo root. Load it unpacked from `chrome://extensions` (enable Developer mode, then Load unpacked → select the repo root folder). Navigate to any `https://www.trademe.co.nz/a/*` property listing to test.
+All extension files live in the repo root. Load it unpacked from `chrome://extensions` (enable Developer mode, then Load unpacked → select the repo root folder). Navigate to a `https://www.trademe.co.nz/a/property/residential/sale/.../listing/...` listing to test. Rental, commercial and error pages must not activate the panel.
 
-**No build step.** Plain browser JavaScript — no npm, webpack, or transpilation. After editing any file, go to `chrome://extensions` and click the reload icon (↺) for the extension, then refresh the TradeMe page. Service worker changes take effect on reload; content script changes take effect on page refresh; popup changes take effect immediately on next open.
+**No build step.** Plain browser JavaScript — no bundler or transpilation. `npm ci && npm test` runs development-only Node/jsdom regressions. After editing any file, go to `chrome://extensions` and click the reload icon (↺) for the extension, then refresh the TradeMe page. Service worker changes take effect on reload; content script changes take effect on page refresh; popup changes take effect immediately on next open.
 
 ## Architecture
 
 ```
 content.js  ←→ (chrome.runtime messages) ←→  background.js
     ↓                                               ↓
-Shadow DOM panel                           4 fetchers + cache
+Shadow DOM panel                           3 fetchers + cache
 (panel.css)                                (in-memory, 30-min TTL)
 ```
 
-**content.js** — injected at `document_idle` on `trademe.co.nz/a/*`. TradeMe is an Angular SPA: address data is injected dynamically after bootstrap, so address extraction polls every 300 ms (up to 10 s timeout). Extraction cascade: JSON-LD → `__NEXT_DATA__` → DOM selectors. URL slug is always used to correct the suburb (TradeMe's JSON-LD `addressLocality` is the district, not the suburb). Patches `history.pushState`/`replaceState` + listens for `popstate` to restart on SPA navigation. Injects a Shadow DOM panel immediately in loading state, then relocates it near the TradeMe "homes estimate" widget once Angular renders.
+**content.js** — uses site adapters for sale-only eligibility and address extraction. A 300 ms lifecycle check handles SPA navigation, delayed DOM updates, error rendering and panel removal. Only confirmed sale listings with a valid address activate the panel. The collapsible Shadow DOM panel is embedded after the adapter’s listing anchor. Wait for document load completion and reject insertion while the anchor’s ancestors or insertion area carry pending Angular `ngh` hydration markers; premature insertion caused TradeMe NG0500 crashes. The panel uses normal document flow, never a fixed overlay. Requests carry a unique `requestId`; streamed and final results are ignored after navigation, errors or superseding requests.
 
 **background.js** — service worker. On `FETCH_VALUATIONS`: reads per-source toggles from `chrome.storage.sync`, runs all enabled fetchers with `Promise.allSettled()`, streams each result to the tab via `VALUATION_UPDATE` as it settles (so cards update incrementally), then sends the full final response and caches by `fullAddress`. On `CLEAR_CACHE`: wipes the in-memory `Map`. Fetch helpers: `fetchWithTimeout` (AbortController, 10 s default), `fetchWithBackoff` (exponential backoff on HTTP 429, up to 3 retries, ±400 ms jitter).
 
@@ -31,8 +31,8 @@ Shadow DOM panel                           4 fetchers + cache
 
 | Type | Direction | Payload |
 |------|-----------|---------|
-| `FETCH_VALUATIONS` | content → background | `{ address: { streetAddress, suburb, city, fullAddress } }` |
-| `VALUATION_UPDATE` | background → content (tab) | `{ result }` — sent once per source as it resolves |
+| `FETCH_VALUATIONS` | content → background | `{ requestId, address: { streetAddress, suburb, city, fullAddress } }` |
+| `VALUATION_UPDATE` | background → content (tab) | `{ requestId, result }` — sent once per source as it resolves |
 | `CLEAR_CACHE` | popup → background | — |
 
 Response to `FETCH_VALUATIONS`: `{ ok: true, results: [...], fromCache: bool }`
@@ -57,11 +57,6 @@ Each fetcher returns (never throws):
 1. `GET gateway.homes.co.nz/address/search?Address=<addr>` — must include `Origin: https://homes.co.nz` and `Referer: https://homes.co.nz/`.
 2. `GET gateway.homes.co.nz/properties?property_ids=<uuid>` → `cards[0].property_details.display_estimated_{lower,upper}_value_short`.
 
-**PropertyValue** (3-step, no auth):
-1. `GET /api/public/clapi/suggestions?q=<addr>&suggestionTypes=address&limit=5` → `propertyId` integer.
-2. `GET /api/public/clapi/properties/<id>` → `estimatedRange.{lowerBand, upperBand, confidence}`.
-3. `GET /api/public/clapi/properties/propertyUrl?propertyId=<id>` → path string for the canonical page URL.
-
 **RealEstate.co.nz** (3-step, requires `Origin: https://www.realestate.co.nz`):
 1. `GET platform.realestate.co.nz/search/v1/listings/smart?q=<addr>&filter[category][0]=res_sale` → `listing-id`.
 2. `GET platform.realestate.co.nz/search/v1/listings/<id>` → `data.attributes['property-short-id']`.
@@ -85,6 +80,5 @@ All fetchers use a **query cascade** (fullAddress → street+suburb → street o
 - **TradeMe DOM timing**: Angular renders asynchronously — always poll, never read DOM once at `document_idle`.
 - **Suburb vs district**: TradeMe JSON-LD `addressLocality` = district (e.g. "Waitakere City"), not suburb. Always override from the URL slug.
 - **OneRoof city in query**: Including the TradeMe region string (e.g. "Canterbury") in the OneRoof search query causes it to match unrelated streets. The cascade intentionally drops the city on later attempts.
-- **PropertyValue unit mismatch**: Suggestions can return a unit record when a bare street address was searched. Validated by checking the `propertyUrl` slug starts with the normalised street address.
 - **Service worker lifecycle**: The service worker may be terminated between page loads, so the in-memory cache may be empty on revival — this is expected behaviour.
-- **RESEARCH.md**: Contains confirmed live API endpoints, auth credentials (OneRoof's are public), response shapes, and anti-scraping notes for all four sources. Consult it before changing any fetcher.
+- **RESEARCH.md**: Contains confirmed live API endpoints, auth credentials (OneRoof's are public), response shapes, and anti-scraping notes for the supported sources. Consult it before changing any fetcher.

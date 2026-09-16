@@ -1,24 +1,27 @@
 # NZ Property Valuator
 
-A Chrome Extension that overlays property valuation data directly onto NZ real estate listing pages.
+A Chrome Extension that overlays property valuation data directly onto NZ residential property sale listings.
 
 ## Purpose
 
-When browsing a property listing on TradeMe, OneRoof, or RealEstate.co.nz, the extension injects a panel showing valuation estimates sourced from third-party NZ property data providers (homes.co.nz, propertyvalue.co.nz, OneRoof, RealEstate.co.nz), giving buyers quick context without leaving the page.
+When browsing a residential sale listing on TradeMe, OneRoof, or RealEstate.co.nz, the extension shows a collapsible valuation panel showing valuation estimates sourced from third-party NZ property data providers (homes.co.nz, OneRoof, RealEstate.co.nz), giving buyers quick context without leaving the page.
 
 ## Supported sites
 
-Panel is injected on these listing sites:
+The panel appears only on residential sale listings on these sites:
 - trademe.co.nz
 - oneroof.co.nz
 - realestate.co.nz
+
+Rental, commercial, search and error pages do not show the panel or request valuations. TradeMe and RealEstate content-script URL patterns are restricted to residential sale paths. OneRoof uses shared property URLs, so its adapter requires a sale title and a sale breadcrumb in the main content. Unconfirmed property pages are excluded.
+
+The panel is embedded in the listing content and scrolls with the page. Insertion waits for page load and for pending Angular hydration markers in the insertion area to clear. Use **Hide estimates** to collapse it.
 
 ## Data sources
 
 Valuation estimates are fetched from:
 - OneRoof
 - homes.co.nz
-- PropertyValue.co.nz
 - RealEstate.co.nz
 
 ## Project structure
@@ -49,11 +52,21 @@ nz-property-valuator/
 1. Open `chrome://extensions`
 2. Enable **Developer mode** (top-right toggle)
 3. Click **Load unpacked** and select this folder
-4. Navigate to any property listing on TradeMe, OneRoof, or RealEstate.co.nz
+4. Navigate to a residential sale listing on TradeMe, OneRoof, or RealEstate.co.nz
+5. After editing files, reload the extension on `chrome://extensions` and refresh the test page. Keep the store version disabled while testing the local version.
+
+There is no build step. To run the regression tests (Node.js 22 or later):
+
+```sh
+npm ci
+npm test
+```
+
+The tests cover framework DOM isolation, sale-only eligibility, SPA navigation, stale responses, error pages, and provider response handling. `node_modules/` and `tests/` are development files and should be excluded from release archives.
 
 ## Status
 
-Fully functional. All four valuation sources (OneRoof, homes.co.nz, PropertyValue, RealEstate.co.nz) are implemented and active across all three supported listing sites.
+All three providers are implemented. Availability depends on provider coverage and access restrictions.
 
 ## Credits
 

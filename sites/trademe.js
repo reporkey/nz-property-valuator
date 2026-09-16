@@ -7,7 +7,6 @@
  * Encapsulates all TradeMe-specific logic:
  *   isListingPage()   — detect individual listing pages
  *   tryExtract()      — address extraction (JSON-LD → __NEXT_DATA__ → DOM)
- *   findPanelAnchor() — preferred DOM insertion point
  */
 
 (() => {
@@ -79,7 +78,7 @@
       const el = document.querySelector(sel);
       if (!el) continue;
       const text  = el.textContent.trim();
-      if (!text) continue;
+      if (!text || !parseAddress(text.split(',')[0]).valid) continue;
       const parts = text.split(',').map(p => p.trim()).filter(Boolean);
       if (parts.length >= 1) {
         return { streetAddress: parts[0] || '', suburb: parts[1] || '', city: parts[2] || '' };
@@ -112,11 +111,21 @@
 
   window.NZValuatorAdapter = {
 
+    findPanelAnchor() {
+      // Platinum listings use a hero h1; place estimates with the address and
+      // property summary instead of inside the hero image.
+      return document.querySelector('.property-info') ||
+        document.querySelector('tm-property-homes-estimate') ||
+        document.querySelector('main h1, article h1, h1');
+    },
+
     isListingPage() {
-      return location.pathname.includes('/listing/');
+      return location.hostname === 'www.trademe.co.nz' &&
+        /^\/a\/property\/residential\/sale\/[^/]+\/[^/]+\/[^/]+\/listing\/\d+\/?$/.test(location.pathname);
     },
 
     tryExtract() {
+      if (!this.isListingPage()) return null;
       let raw = extractFromJsonLd();
       let source = raw ? 'JSON-LD' : null;
       if (!raw) { raw = extractFromNextData(); source = raw ? '__NEXT_DATA__' : null; }
@@ -144,23 +153,5 @@
       return address;
     },
 
-    findPanelAnchor() {
-      // Only use highly specific anchors — broad class selectors like
-      // [class*="property-header"] falsely match sidebar widgets on some listings.
-      const anchors = [
-        'tm-property-homes-estimate',
-        '[data-testid*="homes-estimate"]',
-        '[class*="homes-estimate"]',
-        '[class*="HomesEstimate"]',
-      ];
-      for (const sel of anchors) {
-        const el = document.querySelector(sel);
-        if (el) return el;
-      }
-
-      // For the h1 fallback, prefer a heading inside the main content area.
-      const mainEl = document.querySelector('main, article, [role="main"]');
-      return mainEl ? mainEl.querySelector('h1') : document.querySelector('h1');
-    },
   };
 })();
