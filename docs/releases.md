@@ -8,6 +8,8 @@ The pipeline updates the extension package. Store text, screenshots, privacy dec
 
 ## One-time publishing connection
 
+The dedicated Google Cloud project is `nz-property-valuator-ci` (project number `606087302173`). Its publishing service account is `cws-publisher@nz-property-valuator-ci.iam.gserviceaccount.com`, with provider `projects/606087302173/locations/global/workloadIdentityPools/github-property/providers/github`. The pool restricts access to this repository's numeric ID, owner ID, release workflow, environment, and allowed refs.
+
 No service-account key or refresh token is stored in GitHub. A Google Cloud project, service account and narrowly scoped workload identity provider must be configured before the release workflow can authenticate. CI and ZIP artifacts work without this connection.
 
 Use an authenticated `gcloud` installation or Google Cloud Shell. Replace `YOUR_PROJECT_ID` with the selected project. These commands create dedicated resources; run the creation commands once. No broad project role is granted to the publishing service account.
