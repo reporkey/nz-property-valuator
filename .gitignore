@@ -7,3 +7,5 @@ addressMatcher.test.js
 # macOS
 .DS_Store
 node_modules/
+dist/
+gha-creds-*.json

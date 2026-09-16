@@ -64,6 +64,12 @@ npm test
 
 The tests cover framework DOM isolation, sale-only eligibility, SPA navigation, stale responses, error pages, and provider response handling. `node_modules/` and `tests/` are development files and should be excluded from release archives.
 
+## CI and releases
+
+GitHub Actions runs `npm ci`, regression tests, version checks and release packaging on pull requests and pushes to `main`. Download the extension ZIP and its SHA256 file from the run's artifacts, or build locally with `npm run package`.
+
+Pushing a version tag such as `v1.0.4` runs the checks again and submits that version to the Chrome Web Store. Google still reviews it before automatic publication. Publishing requires the one-time Google Cloud connection described in [docs/releases.md](docs/releases.md). The release workflow also has a read-only `status` operation for verifying that connection.
+
 ## Status
 
 All three providers are implemented. Availability depends on provider coverage and access restrictions.

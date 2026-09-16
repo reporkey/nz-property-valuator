@@ -4,7 +4,9 @@
   "version": "1.0.3",
   "description": "Regression tests for the plain-JavaScript Chrome extension",
   "scripts": {
-    "test": "node --test tests/*.test.cjs"
+    "test": "node --test tests/*.test.cjs",
+    "package": "node scripts/package.mjs",
+    "check": "npm test && npm run package"
   },
   "devDependencies": {
     "jsdom": "^30.0.1"
