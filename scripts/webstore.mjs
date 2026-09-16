@@ -16,7 +16,8 @@ export async function deploy({ token, publisher, item, version, archive, statusO
   }
   const status = await request('fetchStatus');
   if (statusOnly) return status;
-  if (status.takenDown || status.warned) throw new Error('Resolve the store policy notice before releasing');
+  // Warnings and takedowns can require a corrected package. Let the store
+  // review that submission; its API still enforces publishing restrictions.
   const pending = status.submittedItemRevisionStatus;
   const published = status.publishedItemRevisionStatus;
   const hasVersion = revision => revision?.distributionChannels?.some(c => c.crxVersion === version);

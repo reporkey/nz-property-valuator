@@ -58,3 +58,17 @@ test('an unexpected publish response does not claim success', async () => {
   const { promise } = await run([{}, { uploadState: 'SUCCEEDED' }, { state: 'REJECTED' }]);
   await assert.rejects(promise, /Unexpected submission/);
 });
+
+test('policy notices permit corrected packages to enter the normal store review', async () => {
+  for (const notice of [{ warned: true }, { takenDown: true }]) {
+    const { calls, promise } = await run([notice, { uploadState: 'SUCCEEDED' }, { state: 'PENDING_REVIEW' }]);
+    assert.equal((await promise).state, 'PENDING_REVIEW');
+    assert.deepEqual(calls.map(c => c.method), ['GET', 'POST', 'POST']);
+    const blocked = await run([notice, { httpError: 403 }]);
+    await assert.rejects(blocked.promise, /HTTP 403/);
+    assert.equal(blocked.calls.some(c => c.url.endsWith(':publish')), false);
+    const active = await run([{ ...notice, submittedItemRevisionStatus: { state: 'PENDING_REVIEW', distributionChannels: [{ crxVersion: '1.0.3' }] } }]);
+    await assert.rejects(active.promise, /Another submission/);
+    assert.equal(active.calls.length, 1);
+  }
+});

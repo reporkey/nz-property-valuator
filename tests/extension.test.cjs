@@ -167,8 +167,8 @@ test('manifest never injects TradeMe/RealEstate content scripts into rental page
 });
 
 function background() {
-  const context = vm.createContext({ console, setTimeout, clearTimeout, AbortController, TextEncoder, crypto, URL,
-    chrome: { runtime: { onMessage: { addListener() {} } } }, importScripts() {} });
+  const context = vm.createContext({ console, setTimeout, clearTimeout, AbortController, Response, TextEncoder, crypto, URL,
+    chrome: { runtime: { onMessage: { addListener(fn) { context.listener = fn; } } } }, importScripts() {} });
   vm.runInContext(source('addressMatcher.js'), context);
   vm.runInContext(source('background.js'), context);
   return context;
@@ -191,6 +191,95 @@ test('only supported sources are fetched and streamed, even with legacy settings
   assert.ok(messages.every(({ tab, message }) => tab === 42 && message.requestId === 'request-A'));
   assert.equal(ctx.getCached(address.fullAddress).length, 3);
   assert.equal(ctx.fmtAmount(605000), '$605K');
+});
+
+test('sale search bootstraps SPA listing navigation without activating on search or rental', () => {
+  const manifest = JSON.parse(source('manifest.json'));
+  const entry = manifest.content_scripts.find(entry => entry.js.includes('sites/realestate.js'));
+  for (const path of ['/residential/sale', '/residential/sale?by=latest', '/residential/sale/auckland', '/residential/sale/auckland?by=latest']) {
+    const url = `https://www.realestate.co.nz${path}`;
+    assert.ok(entry.matches.some(pattern => new RegExp('^' + pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$').test(url)));
+    const p = page(url, 'realestate'); p.run(); p.tick();
+    assert.equal(p.host(), null);
+    assert.equal(p.requests.length, 0);
+    p.w.history.pushState({}, '', '/12345678/residential/sale/2-white-street'); p.tick();
+    assert.ok(p.host()); assert.equal(p.requests.length, 1);
+    p.w.history.pushState({}, '', '/12345678/residential/rent/2-white-street'); p.tick();
+    assert.equal(p.host(), null); assert.equal(p.requests.length, 1);
+    p.close();
+  }
+});
+
+test('homes fallback retains original city at every search tier', async () => {
+  const query = { streetAddress: '42 Main Street', suburb: 'City Centre', city: 'Auckland', fullAddress: '42 Main Street, City Centre, Auckland' };
+  for (const title of ['42 Main Street, City Centre, Christchurch', '42 Main Street, Riccarton, Christchurch', '42 Main Street', '42 Main Street, North Auckland']) {
+    const ctx = background(); let cards = 0;
+    ctx.fetch = async url => {
+      if (!url.includes('/address/search')) cards++;
+      return Response.json({ Results: [{ Title: title, PropertyID: 'wrong' }] });
+    };
+    const result = await ctx.fetchHomes(query);
+    assert.equal(result.estimate, null, title);
+    assert.equal(cards, 0, title);
+  }
+  for (const title of ['42 Main Street, Different Suburb, Auckland', '42 Main Street, Different Suburb, Auckland City', '42 Main Street, Auckland']) {
+    const ctx = background(); let searches = 0, cards = 0;
+    ctx.fetch = async url => {
+      if (url.includes('/address/search')) return Response.json({ Results: ++searches < 4 ? [] : [{ Title: title, PropertyID: 'correct' }] });
+      cards++;
+      return Response.json({ cards: [{ url: '/auckland/correct', property_details: { display_estimated_lower_value_short: '800K', display_estimated_upper_value_short: '900K' } }] });
+    };
+    const result = await ctx.fetchHomes(query);
+    assert.equal(result.estimate, '$800K – $900K', title);
+    assert.equal(cards, 1);
+  }
+});
+
+test('source settings partition cache, including results finishing after a toggle', async () => {
+  const ctx = background();
+  let enabled = false, calls = 0, finish;
+  ctx.chrome.storage = {
+    sync: { get: async () => ({ sources: { OneRoof: { enabled: false }, 'homes.co.nz': { enabled }, 'RealEstate.co.nz': { enabled: false } } }) },
+    local: { get: async () => ({}), set: async () => {} },
+  };
+  ctx.fetchHomes = async () => { calls++; await new Promise(resolve => { finish = resolve; }); return { source: 'homes.co.nz', estimate: '$800K', error: null }; };
+  const send = () => new Promise(resolve => ctx.listener({ type: 'FETCH_VALUATIONS', address }, {}, resolve));
+  assert.equal((await send()).results[1].disabled, true);
+  enabled = true;
+  const pending = send();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls, 1);
+  enabled = false;
+  assert.equal((await send()).results[1].disabled, true);
+  finish(); await pending;
+  assert.equal((await send()).results[1].disabled, true, 'old enabled request cannot overwrite disabled cache');
+  enabled = true;
+  const restored = await send();
+  assert.equal(restored.results[1].estimate, '$800K');
+  assert.equal(restored.fromCache, true);
+  assert.equal(calls, 1);
+});
+
+test('timeout covers stalled response bodies and buffered responses remain readable', async t => {
+  const http = require('node:http');
+  let stalled = false;
+  const server = http.createServer((req, res) => {
+    if (req.url === '/stall') {
+      stalled = true;
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.write('{');
+    } else if (req.url === '/empty') { res.writeHead(204); res.end(); }
+    else { res.setHeader('Content-Type', 'application/json'); res.end('{"value":42}'); }
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const ctx = background(); ctx.fetch = fetch;
+  await assert.rejects(ctx.fetchWithTimeout(`${base}/stall`, {}, 100), error => error.name === 'AbortError');
+  assert.equal(stalled, true, 'headers and a partial body must arrive before the deadline');
+  assert.deepEqual(await (await ctx.fetchWithTimeout(base)).json(), { value: 42 });
+  assert.equal(await (await ctx.fetchWithTimeout(base)).text(), '{"value":42}');
+  assert.equal((await ctx.fetchWithTimeout(`${base}/empty`)).status, 204);
 });
 
 test('removed source has no card, settings row or host permission', () => {

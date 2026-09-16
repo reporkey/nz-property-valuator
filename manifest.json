@@ -51,7 +51,10 @@
     },
     {
       "matches": [
-        "https://www.realestate.co.nz/*/residential/sale/*"
+        "https://www.realestate.co.nz/*/residential/sale/*",
+        "https://www.realestate.co.nz/residential/sale",
+        "https://www.realestate.co.nz/residential/sale?*",
+        "https://www.realestate.co.nz/residential/sale/*"
       ],
       "js": [
         "addressMatcher.js",
