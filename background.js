@@ -14,7 +14,7 @@ importScripts('addressMatcher.js');
 const stripApos = s => s?.replace(/[''`\u2018\u2019]/g, '') ?? s;
 
 // ─── In-memory cache ──────────────────────────────────────────────────────
-// Keyed by fullAddress string; entries expire after 30 minutes.
+// Keyed by fullAddress and enabled sources; entries expire after 30 minutes.
 // The service worker may be terminated between page loads but survives across
 // refreshes on the same tab session, making this useful for quick re-visits.
 
@@ -22,18 +22,23 @@ const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 /** @type {Map<string, { timestamp: number, results: object[] }>} */
 const cache = new Map();
 
-function getCached(fullAddress) {
-  const entry = cache.get(fullAddress);
+function cacheKey(fullAddress, sources) {
+  return JSON.stringify([fullAddress, DISPLAYED_SOURCES.map(name => sources[name]?.enabled !== false)]);
+}
+
+function getCached(fullAddress, sources = DEFAULT_SOURCE_SETTINGS) {
+  const key = cacheKey(fullAddress, sources);
+  const entry = cache.get(key);
   if (!entry) return null;
   if (Date.now() - entry.timestamp > CACHE_TTL_MS) {
-    cache.delete(fullAddress);
+    cache.delete(key);
     return null;
   }
   return entry.results;
 }
 
-function setCached(fullAddress, results) {
-  cache.set(fullAddress, { timestamp: Date.now(), results });
+function setCached(fullAddress, results, sources = DEFAULT_SOURCE_SETTINGS) {
+  cache.set(cacheKey(fullAddress, sources), { timestamp: Date.now(), results });
 }
 
 // ─── Settings ─────────────────────────────────────────────────────────────
@@ -120,7 +125,13 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 10_000) {
   const ctrl  = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    return await fetch(url, { ...options, signal: ctrl.signal });
+    const response = await fetch(url, { ...options, signal: ctrl.signal });
+    // fetch resolves at headers. Keep the deadline active until the entire
+    // body arrives, then return a buffered response for callers to decode.
+    const body = await response.arrayBuffer();
+    return new Response([204, 205, 304].includes(response.status) ? null : body, {
+      status: response.status, statusText: response.statusText, headers: response.headers,
+    });
   } finally {
     clearTimeout(timer);
   }
@@ -332,16 +343,8 @@ async function fetchHomes(address) {
   //     estimate while the street+city query finds the city-level record that
   //     does have one.
   //
-  // Query order:
-  //   1. fullAddress        — fastest for standard houses; no locality check.
-  //   2. streetAddress+city — skips suburb; fixes mismatch; no locality check.
-  //   3. streetAddress only — widest net; locality check (suburb OR city in
-  //                           title) to avoid cross-city false positives.
-
-  // Three qParsed variants — progressively looser locality matching per tier:
-  //   qParsed:         suburb+city gate (fullAddress and street+suburb queries)
-  //   qParsedCityOnly: city gate only   (street+city query — handles suburb-name mismatches)
-  //   qParsedStreet:   no locality gate (street-only query — widest net)
+  // Search text can broaden, but every candidate must still establish the
+  // original locality. A matching street in another city is not this property.
   const qParsed         = parseAddress(address.streetAddress, address.suburb, address.city);
   const qParsedCityOnly = parseAddress(address.streetAddress, null, address.city);
   const qParsedStreet   = parseAddress(address.streetAddress);
@@ -357,7 +360,20 @@ async function fetchHomes(address) {
 
   function findExact(results, qp) {
     if (!results.length) return null;
-    const matches = results.filter(r => matchAddress(qp, parseAddress(r.Title ?? '')).match);
+    const locality = value => expandSuburbAbbrev((value || '').toLowerCase())
+      .replace(/\s+(city|district)$/, '').trim();
+    const matches = results.filter(r => {
+      const candidate = parseAddress(r.Title ?? '');
+      if (!matchAddress(qp, candidate).match) return false;
+      const city = locality(r.City || candidate.city);
+      const suburb = locality(r.Suburb || candidate.suburb);
+      const queryCity = locality(qParsed.city);
+      const querySuburb = locality(qParsed.suburb);
+      // Two-part titles sometimes put the city in the locality's first slot.
+      // Never accept a conflicting explicit city, even if the suburb matches.
+      if (queryCity) return queryCity === (city || suburb);
+      return !!querySuburb && querySuburb === suburb;
+    });
     if (!matches.length) return null;
     // Prefer building-level record (no unit) when query has no unit.
     if (qp.unitNum === null) {
@@ -383,7 +399,7 @@ async function fetchHomes(address) {
   }
 
   // Query cascade: fullAddress → street+suburb → street+city → street alone.
-  // Each tier uses a progressively looser qParsed so that suburb-name mismatches
+  // Each tier uses a progressively looser suburb match so that name mismatches
   // between TradeMe and homes.co.nz (e.g. "Coatesville" vs "Lucas Heights") are
   // resolved by the time the street+city or street-only tier runs.
   const streetSuburb = [address.streetAddress, address.suburb].filter(Boolean).join(', ');
@@ -649,7 +665,7 @@ function runFetchers(address, sources, tabId, requestId, sendResponse) {
       !r.disabled
     );
     if (!hasTransientError) {
-      setCached(address.fullAddress, results);
+      setCached(address.fullAddress, results, sources);
     }
     recordFetchStatus(results); // fire-and-forget
     sendResponse({ ok: true, results, fromCache: false });
@@ -667,22 +683,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type !== 'FETCH_VALUATIONS') return false;
 
   const { address, requestId } = message;
-  const cacheKey    = address.fullAddress;
   const tabId       = sender.tab?.id ?? null;
-
-  // Return cached results immediately if still fresh.
-  const cached = getCached(cacheKey);
-  if (cached) {
-    sendResponse({ ok: true, results: cached, fromCache: true });
-    return false;
-  }
 
   // Read per-source enabled settings, then dispatch fetchers.
   // Falls back to all-enabled defaults if storage is unavailable.
   chrome.storage.sync
     .get({ sources: DEFAULT_SOURCE_SETTINGS })
-    .then(({ sources }) => runFetchers(address, sources, tabId, requestId, sendResponse))
-    .catch(()           => runFetchers(address, DEFAULT_SOURCE_SETTINGS, tabId, requestId, sendResponse));
+    .catch(() => ({ sources: DEFAULT_SOURCE_SETTINGS }))
+    .then(({ sources }) => {
+      const cached = getCached(address.fullAddress, sources);
+      if (cached) sendResponse({ ok: true, results: cached, fromCache: true });
+      else runFetchers(address, sources, tabId, requestId, sendResponse);
+    });
 
   // Return true to keep the message channel open until sendResponse is called.
   return true;
